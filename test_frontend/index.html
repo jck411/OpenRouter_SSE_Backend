@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat App - Test Frontend</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Chat App Test Frontend</h1>
+            <div class="model-selector">
+                <label for="model-select">Model:</label>
+                <select id="model-select">
+                    <option value="">Loading models...</option>
+                </select>
+                <button id="refresh-models">🔄</button>
+                <a href="#" id="model-info-link" class="model-info-link" title="About this model">About</a>
+            </div>
+            <div class="status" id="status">Disconnected</div>
+        </header>
+
+        <!-- Model Search Section -->
+        <div class="model-search-section">
+            <button id="toggle-model-search-btn" class="toggle-btn">🔍 Model Search & Filter</button>
+            <div id="model-search-panel" class="model-search-panel hidden">
+
+                <!-- Search and Basic Filters -->
+                <div class="search-filters">
+                    <div class="search-row">
+                        <div class="search-group">
+                            <label>Search Models:</label>
+                            <input type="text" id="model-search-term" placeholder="Search by name or description...">
+                        </div>
+                        <div class="search-group">
+                            <label>Sort By:</label>
+                            <select id="model-sort">
+                                <option value="newest">Newest</option>
+                                <option value="top_weekly">Most Popular</option>
+                                <option value="pricing_low_to_high">Price: Low to High</option>
+                                <option value="pricing_high_to_low">Price: High to Low</option>
+                                <option value="context_high_to_low">Context: High to Low</option>
+                                <option value="context_low_to_high">Context: Low to High</option>
+                                <option value="throughput_high_to_low">Throughput: High to Low</option>
+                                <option value="latency_low_to_high">Latency: Low to High</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Modality Filters -->
+                    <div class="filter-group">
+                        <h4>🔄 Modalities</h4>
+                        <div class="modalities-container">
+                            <div class="modality-section">
+                                <h5>📱 Input</h5>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox" id="input-text" value="text"> Text</label>
+                                    <label><input type="checkbox" id="input-image" value="image"> Image</label>
+                                    <label><input type="checkbox" id="input-file" value="file"> File</label>
+                                    <label><input type="checkbox" id="input-audio" value="audio"> Audio</label>
+                                </div>
+                            </div>
+                            <div class="modality-section">
+                                <h5>📤 Output</h5>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox" id="output-text" value="text"> Text</label>
+                                    <label><input type="checkbox" id="output-image" value="image"> Image</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Context Length Filter -->
+                    <div class="filter-group">
+                        <h4>📏 Context Length</h4>
+                        <div class="slider-group">
+                            <div class="slider-container">
+                                <label>Minimum Context Length:</label>
+                                <div class="single-range-container">
+                                    <input type="range" id="context-length-slider" min="0" max="10" value="0"
+                                        class="single-range-slider">
+                                </div>
+                                <div class="single-range-label">
+                                    <span id="context-length-label">4K</span>
+                                </div>
+                                <button type="button" id="reset-context" class="reset-slider-btn">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Price Filter -->
+                    <div class="filter-group">
+                        <h4>💰 Price Filter</h4>
+                        <div class="price-group">
+                            <label>
+                                <input type="checkbox" id="free-only"> Free Models Only
+                            </label>
+                            <div class="slider-group">
+                                <div class="slider-container">
+                                    <label>Price Range:</label>
+                                    <div class="dual-range-container">
+                                        <input type="range" id="min-price-slider" min="0" max="10" value="0"
+                                            class="range-slider">
+                                        <input type="range" id="max-price-slider" min="0" max="10" value="10"
+                                            class="range-slider">
+                                    </div>
+                                    <div class="range-labels">
+                                        <span id="min-price-label">FREE</span>
+                                        <span>to</span>
+                                        <span id="max-price-label">$10+</span>
+                                    </div>
+                                    <button type="button" id="reset-price" class="reset-slider-btn">Reset</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parameter Support Filter -->
+                    <div class="filter-group">
+                        <h4>⚙️ Required Parameters</h4>
+                        <div class="checkbox-group">
+                            <!-- Model Behavior -->
+                            <label><input type="checkbox" id="param-temperature" value="temperature">
+                                Temperature</label>
+                            <label><input type="checkbox" id="param-top-p" value="top_p"> Top-p</label>
+                            <label><input type="checkbox" id="param-top-k" value="top_k"> Top-k</label>
+                            <label><input type="checkbox" id="param-frequency-penalty" value="frequency_penalty">
+                                Frequency Penalty</label>
+                            <label><input type="checkbox" id="param-presence-penalty" value="presence_penalty"> Presence
+                                Penalty</label>
+                            <!-- Output Controls -->
+                            <label><input type="checkbox" id="param-max-tokens" value="max_tokens"> Max Tokens</label>
+                            <label><input type="checkbox" id="param-stop" value="stop"> Stop Sequences</label>
+                            <label><input type="checkbox" id="param-response-format" value="response_format"> Response
+                                Format</label>
+                            <!-- Function Calling -->
+                            <label><input type="checkbox" id="param-tools" value="tools"> Tools</label>
+                            <label><input type="checkbox" id="param-tool-choice" value="tool_choice"> Tool
+                                Choice</label>
+                            <!-- Reasoning -->
+                            <label><input type="checkbox" id="param-reasoning" value="reasoning"> Reasoning</label>
+                            <label><input type="checkbox" id="param-include-reasoning" value="include_reasoning">
+                                Include Reasoning</label>
+                        </div>
+                    </div>
+
+                    <!-- Pagination Controls -->
+                    <div class="filter-group">
+                        <h4>📄 Results</h4>
+                        <div class="pagination-controls">
+                            <div class="range-input">
+                                <label>Limit:</label>
+                                <select id="search-limit">
+                                    <option value="10">10</option>
+                                    <option value="25">25</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </div>
+                            <div class="range-input">
+                                <label>Offset:</label>
+                                <input type="number" id="search-offset" value="0" min="0" step="10">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Search Actions -->
+                    <div class="search-actions">
+                        <button id="apply-model-search" class="search-btn">🔍 Search Models</button>
+                        <button id="clear-model-search" class="clear-btn">Clear Filters</button>
+                        <div class="search-results-info">
+                            <span id="search-results-count">No search performed yet</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Simple Parameters Section -->
+        <div class="parameters-section">
+            <button id="toggle-params" class="toggle-btn">⚙️ Parameters</button>
+            <div id="param-filter-info" class="param-filter-info hidden">
+                <span>📋 Showing parameters supported by selected model</span>
+            </div>
+            <div id="params-panel" class="params-panel hidden">
+                <!-- OpenRouter Routing & Cost Controls -->
+                <div class="param-group">
+                    <h4>🎯 Routing & Cost Controls</h4>
+                    <div class="param-row">
+                        <label>Sort Strategy:</label>
+                        <select id="sort">
+                            <option value="">Default</option>
+                            <option value="price">Price</option>
+                            <option value="throughput">Throughput</option>
+                            <option value="random">Random</option>
+                        </select>
+                    </div>
+                    <div class="param-row">
+                        <label>Providers (CSV):</label>
+                        <input type="text" id="providers" placeholder="openai,anthropic,google">
+                    </div>
+                    <div class="param-row">
+                        <label>Max Price:</label>
+                        <input type="number" id="max-price" step="0.001" min="0" placeholder="0.01">
+                    </div>
+                    <div class="param-row">
+                        <label>Fallbacks (CSV):</label>
+                        <input type="text" id="fallbacks" placeholder="gpt-4o-mini,claude-3-haiku">
+                    </div>
+                    <div class="param-row">
+                        <label>
+                            <input type="checkbox" id="require-parameters">
+                            Require Parameter Support
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Model Behavior Parameters -->
+                <div class="param-group">
+                    <h4>🎛️ Model Behavior</h4>
+                    <div class="param-row">
+                        <label>Temperature (0-2):</label>
+                        <input type="range" id="temperature" min="0" max="2" step="0.1" value="1.0">
+                        <span id="temp-value">1.0</span>
+                    </div>
+                    <div class="param-row">
+                        <label>Top-p (0-1):</label>
+                        <input type="range" id="top-p" min="0" max="1" step="0.05" value="1.0">
+                        <span id="top-p-value">1.0</span>
+                    </div>
+                    <div class="param-row">
+                        <label>Top-k:</label>
+                        <input type="number" id="top-k" min="1" placeholder="40">
+                    </div>
+                    <div class="param-row">
+                        <label>Frequency Penalty (-2 to 2):</label>
+                        <input type="range" id="frequency-penalty" min="-2" max="2" step="0.1" value="0">
+                        <span id="freq-penalty-value">0.0</span>
+                    </div>
+                    <div class="param-row">
+                        <label>Presence Penalty (-2 to 2):</label>
+                        <input type="range" id="presence-penalty" min="-2" max="2" step="0.1" value="0">
+                        <span id="pres-penalty-value">0.0</span>
+                    </div>
+                    <div class="param-row">
+                        <label>Repetition Penalty:</label>
+                        <input type="number" id="repetition-penalty" min="0" step="0.01" placeholder="1.0">
+                    </div>
+                    <div class="param-row">
+                        <label>Min-p (0-1):</label>
+                        <input type="number" id="min-p" min="0" max="1" step="0.01" placeholder="0.0">
+                    </div>
+                    <div class="param-row">
+                        <label>Top-a (0-1):</label>
+                        <input type="number" id="top-a" min="0" max="1" step="0.01" placeholder="0.0">
+                    </div>
+                    <div class="param-row">
+                        <label>Seed:</label>
+                        <input type="number" id="seed" placeholder="12345">
+                    </div>
+                </div>
+
+                <!-- Output Controls -->
+                <div class="param-group">
+                    <h4>📄 Output Controls</h4>
+                    <div class="param-row">
+                        <label>Max Tokens:</label>
+                        <input type="number" id="max-tokens" min="1" placeholder="1000">
+                    </div>
+                    <div class="param-row">
+                        <label>Stop Sequences:</label>
+                        <input type="text" id="stop" placeholder='["\\n", "END"]'>
+                    </div>
+                    <div class="param-row">
+                        <label>Logit Bias (JSON):</label>
+                        <textarea id="logit-bias" rows="2" placeholder='{"50256": -100}'></textarea>
+                    </div>
+                    <div class="param-row">
+                        <label>
+                            <input type="checkbox" id="logprobs">
+                            Return Log Probabilities
+                        </label>
+                    </div>
+                    <div class="param-row">
+                        <label>Top Logprobs (0-20):</label>
+                        <input type="number" id="top-logprobs" min="0" max="20" placeholder="5">
+                    </div>
+                    <div class="param-row">
+                        <label>Response Format (JSON):</label>
+                        <textarea id="response-format" rows="2" placeholder='{"type": "json_object"}'></textarea>
+                    </div>
+                </div>
+
+                <!-- Function Calling -->
+                <div class="param-group">
+                    <h4>🛠️ Function Calling</h4>
+                    <div class="param-row">
+                        <label>Tools (JSON Array):</label>
+                        <textarea id="tools" rows="3"
+                            placeholder='[{"type": "function", "function": {...}}]'></textarea>
+                    </div>
+                    <div class="param-row">
+                        <label>Tool Choice:</label>
+                        <input type="text" id="tool-choice" placeholder='auto, none, or {"type": "function", ...}'>
+                    </div>
+                </div>
+
+                <!-- Reasoning Controls -->
+                <div class="param-group">
+                    <h4>🧠 Reasoning Controls</h4>
+                    <div class="param-row">
+                        <label>Reasoning Effort:</label>
+                        <select id="reasoning-effort">
+                            <option value="">Default</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div class="param-row">
+                        <label>Reasoning Max Tokens:</label>
+                        <input type="number" id="reasoning-max-tokens" min="1" placeholder="1000">
+                    </div>
+                    <div class="param-row"
+                        title="Skips reasoning-capable pathway for faster, cheaper responses (no chain-of-thought streamed).">
+                        <label>
+                            <input type="checkbox" id="disable-reasoning">
+                            Disable Reasoning (faster)
+                        </label>
+                    </div>
+                    <div class="param-row">
+                        <label>
+                            <input type="checkbox" id="include-reasoning">
+                            Show Reasoning Process
+                        </label>
+                    </div>
+                </div>
+
+                <div class="param-actions">
+                    <button id="reset-params">Reset All</button>
+                    <button id="save-preset">Save Preset</button>
+                    <button id="load-preset">Load Preset</button>
+                </div>
+            </div>
+        </div>
+
+        <main>
+            <div class="chat-container">
+                <div class="messages" id="messages">
+                    <div class="message system">
+                        <div class="message-content">
+                            Welcome to the chat app! Select a model and start chatting.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-container">
+                <div class="input-row">
+                    <textarea id="message-input" placeholder="Type your message here..." rows="3"></textarea>
+                    <button id="send-button" disabled>Send</button>
+                </div>
+                <div class="controls">
+                    <button id="clear-chat">Clear Chat</button>
+                    <div class="web-search-toggle">
+                        <label for="web-search-checkbox">
+                            <input type="checkbox" id="web-search-checkbox">
+                            Web Search
+                        </label>
+                    </div>
+                    <span class="stream-info">Streaming enabled</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Model Info Modal -->
+    <div id="model-info-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="model-info-title">Model Info</h3>
+                <button id="model-info-close" class="modal-close" aria-label="Close">×</button>
+            </div>
+            <div id="model-info-body" class="modal-body">
+                Loading...
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
