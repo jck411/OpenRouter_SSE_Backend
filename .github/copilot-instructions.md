@@ -1,73 +1,86 @@
-# COPILOT.md — Concise Repo Instructions
+
+# Copilot Instructions
 
 ## Rule 0 — Context7
-- Before writing code, dependencies, or architecture: consult **Context7 docs** (MCP server in VS Code).
+
+* **Always check Context7 docs** (MCP server in VS Code) before coding, wiring deps, or designing architecture.
 
 ## Project
-- Deps & packaging: **`uv`**
-- Virtualenv: **`.venv/` at repo root**; VS Code Python = `.venv/bin/python`
-- Tests: **`pytest`**, files **`test_*.py`**
-- Structure: **one responsibility per file**
+
+* **Deps/packaging**: `uv`
+* **Venv**: `.venv/` at repo root; VS Code Python = `.venv/bin/python`
+* **Tests**: `pytest`, files `test_*.py`
+* **Structure**: one responsibility per file
 
 ## Transport / OpenRouter
-- Client: **OpenAI SDK** with `base_url=https://openrouter.ai/api/v1` for **all chat + streaming**
-- Always send headers: **`HTTP-Referer`** and **`X-Title`** (from env) on every request
-- Pass-through knobs (no reinterpretation): **providers, sort, fallbacks, max_price, reasoning, include_reasoning**
-- Model listing: prefer **`sdk.models.list()`**; only hit raw HTTP if SDK lacks a feature
+
+* **Client**: OpenAI SDK (`base_url=https://openrouter.ai/api/v1`) for all chat/streaming
+* **Headers**: always send `HTTP-Referer` + `X-Title` (from env)
+* **Pass-through only**: `providers, sort, fallbacks, max_price, reasoning, include_reasoning`
+* **Models**: prefer `sdk.models.list()`, fall back to raw HTTP only if needed
 
 ## Tools (MCP-first)
-- **All tool use goes through MCP servers** (discovery, schemas, execution)
-- The app controls orchestration/retries/validation around MCP results (not the model)
-- Keep MCP **thin** (no business logic); log inputs/outputs centrally
+
+* All tool use = **MCP servers** (discovery, schemas, execution)
+* App handles orchestration/retries/validation, not the model
+* MCP = **thin layer**, no business logic; log inputs/outputs centrally
 
 ## Reasoning Models
-- Use **Chat Completions** on OpenRouter
-- Request thinking tokens with **`reasoning={...}`** and/or **`include_reasoning`** when supported
-- Treat **OpenRouter typed frames**:
-  - `type: "reasoning"` → stream to client as `event: reasoning`
-  - `type: "content"` / message deltas → `event: content`
-- Only use **OpenAI Responses API** when calling **OpenAI’s own base URL** AND a model **requires it** (e.g., o3/o4 variants)
+
+* Use **Chat Completions** on OpenRouter
+* Request thinking tokens via `reasoning={...}` / `include_reasoning`
+* Stream typed frames:
+
+  * `reasoning` → `event: reasoning`
+  * `content` → `event: content`
+* Use **OpenAI Responses API** only with OpenAI base URL if model requires (e.g., o3/o4)
 
 ## Streaming
-- **Single end-to-end SSE pipeline** (server emits `reasoning` and `content` events)
-- **Never buffer** full responses; flush deltas as they arrive
-- Backpressure: throttle server emits if client lags; surface partials safely
-- Media policy:
-  - **Default SSE** for text/JSON
-  - If doing **live audio/video or binary streaming**, add a **WebSocket** path (or **WebRTC** for real-time A/V)
-  - Otherwise ship media via **HTTP uploads/downloads** (pre-signed URLs)
+
+* **One SSE pipeline**: server emits `reasoning` + `content`
+* **Never buffer**, flush deltas immediately
+* Handle backpressure: throttle emits if client lags, preserve partials
 
 ## Frontend Contract
-- Listen for SSE events:
-  - `event: reasoning` → append to “thinking” panel (hideable)
-  - `event: content` → append to chat transcript
-  - `event: usage` / `event: meta` (optional) for token/cost/finish_reason
-- Do not persist “reasoning” content; treat as ephemeral UI
+
+* SSE events:
+
+  * `reasoning` → “thinking” panel (ephemeral)
+  * `content` → chat transcript
+  * `usage` / `meta` → optional token/cost info
 
 ## Reliability & Async
-- **Fail fast** with clear error types/messages
-- Catch broad exceptions **only at I/O boundaries**
-- Prefer **async/event-driven**; use **async I/O** for ops > ~10ms
-- **Always set timeouts** (connect, read, total)
-- Implement **retries with jitter** for idempotent calls
-- Never swallow **`CancelledError`**; propagate cancellation
+
+* **Fail fast** with clear errors
+* Catch broad exceptions only at I/O boundaries
+* Prefer **async/event-driven**; use async for >10ms ops
+* **Always set timeouts** (connect, read, total)
+* Retries w/ jitter for idempotent calls
+* Never swallow `CancelledError`
 
 ## Observability
-- Log: request id, model, provider(s), pricing caps, timing, token usage, finish reason
-- Redact secrets; sample payloads for large requests
-- Metrics: p95 latency, token rate, SSE drop/retry counts
+
+* Log: request id, model, providers, caps, timing, tokens, finish reason
+* Redact secrets; sample payloads only
+* Metrics: p95 latency, token rate, SSE drops/retries
 
 ## Code Standards
-- **Python 3.11+**
-- **PEP 8**, type hints, **`mypy --strict`**
-- **`ruff`** for format/lint/imports
+
+* Python 3.11+
+* PEP 8 + type hints, `mypy --strict`
+* `ruff` for lint/format/imports
 
 ## Security
-- Secrets via env/secret manager; never commit
-- Validate MCP tool inputs/outputs against declared schemas
-- Enforce **model allowlist** and **price caps** at request time
+
+* Secrets = env/secret manager
+* Validate MCP I/O vs schemas
+* Enforce model allowlist + price caps
 
 ## Principles
-- Prefer **simple** solutions
-- **Remove obsolete** code (delete the PydanticAI path)
-- **No fake data** outside tests
+
+* Prefer **simple**
+* Delete obsolete paths (e.g., PydanticAI)
+* **No fake data** outside tests
+
+---
+

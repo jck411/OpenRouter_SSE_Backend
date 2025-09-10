@@ -1,6 +1,6 @@
 # tests/test_chat.py
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient, Response
@@ -46,8 +46,8 @@ async def test_chat_endpoint_with_valid_request(
         yield {"type": "done", "data": {"completed": True}}
 
     with patch(
-        "services.openrouter_sse_client.stream_chat_completion",
-        new=AsyncMock(side_effect=fake_stream),
+        "routers.chat.stream_chat_completion",
+        new=fake_stream,
     ):
         resp: Response = await async_client.post("/chat", json=sample_chat_request)
         assert resp.status_code == 200
@@ -70,8 +70,8 @@ async def test_pass_through_knobs(async_client: AsyncClient) -> None:
         yield {"type": "done", "data": {"completed": True}}
 
     with patch(
-        "services.openrouter_sse_client.stream_chat_completion",
-        new=AsyncMock(side_effect=capturing_stream),
+        "routers.chat.stream_chat_completion",
+        new=capturing_stream,
     ):
         body = {"history": [], "message": "Hi"}
         params = {
@@ -87,7 +87,8 @@ async def test_pass_through_knobs(async_client: AsyncClient) -> None:
         assert captured.get("providers") == ["openai", "anthropic"]
         assert captured.get("sort") == "throughput_high_to_low"
         assert captured.get("fallbacks") == ["foo", "bar"]
-        assert float(captured.get("max_price")) == 0.01
+        max_price_val = captured.get("max_price")
+        assert max_price_val is not None and float(max_price_val) == 0.01
         assert captured.get("include_reasoning") is True
 
 
@@ -114,8 +115,8 @@ async def test_timeout_sse_error(async_client: AsyncClient) -> None:
         yield {"type": "done", "data": {"completed": False}}
 
     with patch(
-        "services.openrouter_sse_client.stream_chat_completion",
-        new=AsyncMock(side_effect=fake_stream_timeout),
+        "routers.chat.stream_chat_completion",
+        new=fake_stream_timeout,
     ):
         body = {"history": [], "message": "Hi"}
         resp: Response = await async_client.post("/chat", json=body)

@@ -1,8 +1,6 @@
 import pytest
 from httpx import AsyncClient
 
-from routers import chat as chat_router
-
 
 @pytest.mark.asyncio
 async def test_disable_reasoning_prevents_reasoning_path(async_client: AsyncClient, monkeypatch):
@@ -17,10 +15,10 @@ async def test_disable_reasoning_prevents_reasoning_path(async_client: AsyncClie
         return True
 
     # New implementation uses services.openrouter_sse_client.model_supports_reasoning
-    monkeypatch.setattr(chat_router, "model_supports_reasoning", _always_supports)
+    monkeypatch.setattr("routers.chat.model_supports_reasoning", _always_supports)
 
-    # Minimal request body
-    body = {"history": [], "message": "Test message", "model": "test/model"}
+    # Minimal request body - use a valid model ID
+    body = {"history": [], "message": "Test message", "model": "openai/gpt-4o"}
 
     # With disable_reasoning=true
     resp = await async_client.post("/chat?disable_reasoning=true", json=body)
@@ -45,9 +43,9 @@ async def test_reasoning_auto_enabled_without_disable(async_client: AsyncClient,
     async def _always_supports(_model_id: str) -> bool:  # pragma: no cover - trivial
         return True
 
-    monkeypatch.setattr(chat_router, "model_supports_reasoning", _always_supports)
+    monkeypatch.setattr("routers.chat.model_supports_reasoning", _always_supports)
 
-    body = {"history": [], "message": "Test message", "model": "test/model"}
+    body = {"history": [], "message": "Test message", "model": "openai/gpt-4o"}
     resp = await async_client.post("/chat", json=body)
     assert resp.status_code in [200, 400, 502, 503, 504]
     text = resp.text
