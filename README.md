@@ -126,16 +126,29 @@ Environment variables:
 # Install dev dependencies
 uv pip install -e .[dev]
 
+# Install pre-commit hooks (runs automatically on git commit)
+pre-commit install
+
+# Run pre-commit hooks manually
+pre-commit run --all-files
+
 # Run tests
 pytest
 
-# Lint and format
+# Lint and format (or use pre-commit)
 ruff check src tests
 ruff format src tests
 
-# Type check
+# Type check (or use pre-commit)
 mypy src
 ```
+
+Pre-commit hooks will automatically run on each commit to ensure code quality with:
+- Trailing whitespace removal
+- End-of-file fixing
+- JSON/YAML validation
+- Ruff linting and formatting
+- MyPy type checking
 
 ## MCP Server
 
