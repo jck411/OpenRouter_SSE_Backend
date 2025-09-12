@@ -57,7 +57,6 @@ async def stream_chat_completion(
     require_parameters: bool | None = None,
     # Reasoning controls
     reasoning: ReasoningParams | None = None,
-    include_reasoning: bool | None = None,
     # Standard LLM parameters
     temperature: float | None = None,
     top_p: float | None = None,
@@ -104,10 +103,13 @@ async def stream_chat_completion(
         payload["max_price"] = max_price
     if require_parameters is not None:
         payload["require_parameters"] = require_parameters
-    if include_reasoning is not None:
-        payload["include_reasoning"] = include_reasoning
     if reasoning:
-        payload["reasoning"] = reasoning
+        # For OpenAI models, use reasoning_effort as top-level parameter instead of reasoning object
+        if model.startswith("openai/") and "effort" in reasoning:
+            payload["reasoning_effort"] = reasoning["effort"]
+            # Don't add the reasoning object for OpenAI models when using effort
+        else:
+            payload["reasoning"] = reasoning
 
     # Add standard LLM parameters
     for key, val in (
@@ -333,7 +335,7 @@ def _extract_reasoning_capability(model_obj: dict[str, Any]) -> bool:
     # model_obj is guaranteed to be a dict (or empty dict) by the caller
 
     model_id = model_obj.get("id", "")
-    
+
     # Special case: OpenAI o1/o3 models support reasoning_effort even if not in supported_parameters
     if model_id.startswith("openai/") and any(x in model_id.lower() for x in ["o1", "o3"]):
         return True
