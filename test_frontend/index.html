@@ -142,8 +142,8 @@
                                 Choice</label>
                             <!-- Reasoning -->
                             <label><input type="checkbox" id="param-reasoning" value="reasoning"> Reasoning</label>
-                            <label><input type="checkbox" id="param-include-reasoning" value="include_reasoning">
-                                Include Reasoning</label>
+                            <label><input type="checkbox" id="param-reasoning-exclude" value="reasoning_exclude">
+                                Reasoning Exclude</label>
                         </div>
                     </div>
 
@@ -314,10 +314,9 @@
                     <div class="param-row">
                         <label>Reasoning Effort:</label>
                         <select id="reasoning-effort">
-                            <option value="">Default</option>
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
-                            <option value="high">High</option>
+                            <option value="high" selected>High</option>
                         </select>
                     </div>
                     <div class="param-row">
@@ -333,8 +332,8 @@
                     </div>
                     <div class="param-row">
                         <label>
-                            <input type="checkbox" id="include-reasoning">
-                            Show Reasoning Process
+                            <input type="checkbox" id="hide-reasoning">
+                            Hide Reasoning Process
                         </label>
                     </div>
                 </div>
