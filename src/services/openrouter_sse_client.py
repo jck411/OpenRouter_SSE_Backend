@@ -108,6 +108,12 @@ async def stream_chat_completion(
         if model.startswith("openai/") and "effort" in reasoning:
             payload["reasoning_effort"] = reasoning["effort"]
             # Don't add the reasoning object for OpenAI models when using effort
+        # For DeepSeek models, handle include_reasoning parameter separately
+        elif "deepseek" in model.lower():
+            payload["reasoning"] = reasoning
+            # Map reasoning.exclude to include_reasoning (inverse logic)
+            if "exclude" in reasoning:
+                payload["include_reasoning"] = not reasoning["exclude"]
         else:
             payload["reasoning"] = reasoning
 

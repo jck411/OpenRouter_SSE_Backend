@@ -66,7 +66,35 @@ uv run openrouter-mcp
 - `max_price` - Maximum cost per request
 - `fallbacks` - CSV list of fallback models
 - `reasoning_effort` - low, medium, high
+- `reasoning_exclude` - Hide reasoning from response
 - `disable_reasoning` - Force disable reasoning
+
+## Reasoning Model Support
+
+This backend supports multiple reasoning model families with different parameter requirements:
+
+### OpenAI Models (o1, o3 series)
+- **Models**: `openai/o1-mini`, `openai/o1-preview`, `openai/o3-mini`, `openai/o3`, etc.
+- **Parameters**: `reasoning_effort` (top-level parameter)
+- **Values**: `"low"`, `"medium"`, `"high"`
+- **Special handling**: Uses `reasoning_effort` instead of `reasoning` object
+- **Example**: `{"reasoning_effort": "high"}`
+
+### DeepSeek Models (R1 series)
+- **Models**: `deepseek/deepseek-r1`, `deepseek/deepseek-r1-distill-*`, etc.
+- **Parameters**: `reasoning` object + `include_reasoning` boolean
+- **Special handling**: Maps `reasoning_exclude` to inverse of `include_reasoning`
+- **Example**: `{"reasoning": {"effort": "high"}, "include_reasoning": true}`
+
+### Qwen Models (Thinking variants)
+- **Models**: `qwen/qwen3-next-*-thinking`, `qwen/qwq-32b-preview`, etc.
+- **Parameters**: Standard `reasoning` object
+- **Example**: `{"reasoning": {"effort": "high", "exclude": false}}`
+
+### Other Reasoning Models
+- **Models**: Various providers with reasoning capabilities
+- **Parameters**: Detected via `supported_parameters` list
+- **Common parameters**: `reasoning`, `include_reasoning`
 
 ### Model Discovery
 
