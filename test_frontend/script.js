@@ -86,7 +86,7 @@ class ChatApp {
             tools: document.getElementById('param-tools'),
             tool_choice: document.getElementById('param-tool-choice'),
             reasoning: document.getElementById('param-reasoning'),
-            include_reasoning: document.getElementById('param-include-reasoning')
+            reasoning_exclude: document.getElementById('param-reasoning-exclude')
         };
 
         // Slider elements with value displays
@@ -379,6 +379,9 @@ class ChatApp {
         inputs.forEach(input => {
             if (input.type === 'checkbox') {
                 input.checked = false;
+            } else if (input.id === 'reasoning-effort') {
+                // Reset reasoning effort to default 'high' to match backend default
+                input.value = 'high';
             } else {
                 input.value = '';
             }
@@ -455,8 +458,7 @@ class ChatApp {
             // Reasoning controls
             'reasoning-effort': 'reasoning_effort',
             'reasoning-max-tokens': 'reasoning_max_tokens',
-            'reasoning-exclude': 'reasoning_exclude',
-            'include-reasoning': 'include_reasoning',
+            'hide-reasoning': 'reasoning_exclude',  // Maps to backend reasoning_exclude parameter
             'disable-reasoning': 'disable_reasoning'  // Maps to backend disable_reasoning parameter
         };
 
@@ -467,9 +469,9 @@ class ChatApp {
                 let shouldShow = false;
 
                 // For reasoning parameters, show if model supports any reasoning capability
-                if (['reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'include_reasoning', 'disable_reasoning'].includes(paramName)) {
+                if (['reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'disable_reasoning'].includes(paramName)) {
                     shouldShow = supportedParams.some(param =>
-                        ['reasoning', 'include_reasoning', 'reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'disable_reasoning'].includes(param)
+                        ['reasoning', 'reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'disable_reasoning'].includes(param)
                     );
                 } else {
                     // For other parameters, check if it's in the provider parameter union
@@ -705,12 +707,9 @@ class ChatApp {
             const reasoningMaxTokens = getValue('reasoning-max-tokens');
             if (reasoningMaxTokens !== null) params.reasoning_max_tokens = reasoningMaxTokens;
 
-            // Keep ability to explicitly exclude (hide) reasoning trace without disabling the feature entirely
-            const reasoningExclude = getValue('disable-reasoning'); // legacy meaning: hide reasoning (kept for presets)
-            if (reasoningExclude) params.reasoning_exclude = reasoningExclude;
-
-            const includeReasoning = getValue('include-reasoning');
-            if (includeReasoning) params.include_reasoning = includeReasoning;
+            // Hide reasoning checkbox maps to reasoning_exclude parameter
+            const hideReasoning = getValue('hide-reasoning');
+            if (hideReasoning) params.reasoning_exclude = hideReasoning;
         }
 
         return params;
@@ -756,9 +755,12 @@ class ChatApp {
 
             let elementId = key.replace(/_/g, '-');
             let element = document.getElementById(elementId);
-            // Map backend disable_reasoning to new disable-reasoning checkbox
+            // Map backend parameters to frontend element IDs
             if (!element && key === 'disable_reasoning') {
                 element = document.getElementById('disable-reasoning');
+            }
+            if (!element && key === 'reasoning_exclude') {
+                element = document.getElementById('hide-reasoning');
             }
             if (!element) return;
 
