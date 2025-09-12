@@ -79,7 +79,6 @@ async def test_pass_through_knobs(async_client: AsyncClient) -> None:
             "sort": "throughput_high_to_low",
             "fallbacks": "foo,bar",
             "max_price": "0.01",
-            "include_reasoning": "true",
         }
         resp: Response = await async_client.post("/chat", json=body, params=params)
         assert resp.status_code == 200
@@ -89,7 +88,6 @@ async def test_pass_through_knobs(async_client: AsyncClient) -> None:
         assert captured.get("fallbacks") == ["foo", "bar"]
         max_price_val = captured.get("max_price")
         assert max_price_val is not None and float(max_price_val) == 0.01
-        assert captured.get("include_reasoning") is True
 
 
 @pytest.mark.asyncio

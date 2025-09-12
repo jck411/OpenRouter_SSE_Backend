@@ -66,7 +66,6 @@ uv run openrouter-mcp
 - `max_price` - Maximum cost per request
 - `fallbacks` - CSV list of fallback models
 - `reasoning_effort` - low, medium, high
-- `include_reasoning` - Include reasoning in stream
 - `disable_reasoning` - Force disable reasoning
 
 ### Model Discovery

@@ -148,7 +148,6 @@ async def list_models() -> ModelListResponse:
                     "reasoning_effort",
                     "reasoning_max_tokens",
                     "reasoning_exclude",
-                    "include_reasoning",
                 ],
                 "note": "Parameter support varies by model and provider. Use require_parameters=true to ensure compatibility.",
             },

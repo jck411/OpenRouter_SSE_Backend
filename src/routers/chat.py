@@ -250,9 +250,6 @@ async def chat(
     ),
     reasoning_max_tokens: int | None = Query(None, ge=1),
     reasoning_exclude: bool | None = Query(None, description="If true, hide reasoning trace"),
-    include_reasoning: bool | None = Query(
-        None, description="If true, include reasoning in the response text stream"
-    ),
     disable_reasoning: bool | None = Query(
         None,
         description="Force disable reasoning entirely (overrides any reasoning_* params and auto-detection)",
@@ -303,7 +300,6 @@ async def chat(
         reasoning_effort: Reasoning depth for capable models
         reasoning_max_tokens: Limit reasoning token usage
         reasoning_exclude: Hide reasoning from response
-        include_reasoning: Include reasoning in content stream
         disable_reasoning: Force disable all reasoning features
 
     Returns:
@@ -356,14 +352,9 @@ async def chat(
         if not disable_reasoning and await model_supports_reasoning(final_model):
             reasoning = {"effort": "high"}
 
-    # If exclude=True and include_reasoning=True, prefer exclude (don't leak)
-    if reasoning and reasoning.get("exclude") and include_reasoning:
-        include_reasoning = False
-
     # Explicit override: disable reasoning completely
     if disable_reasoning:
         reasoning = None
-        include_reasoning = False
 
     # Parse JSON parameters (strict for JSON-looking values)
     parse_errors: list[str] = []
@@ -421,7 +412,6 @@ async def chat(
                 require_parameters=require_parameters,
                 # Reasoning controls
                 reasoning=reasoning,
-                include_reasoning=include_reasoning,
                 # Standard LLM parameters
                 temperature=temperature,
                 top_p=top_p,

@@ -16,7 +16,7 @@
 
 * **Client**: OpenAI SDK (`base_url=https://openrouter.ai/api/v1`) for all chat/streaming
 * **Headers**: always send `HTTP-Referer` + `X-Title` (from env)
-* **Pass-through only**: `providers, sort, fallbacks, max_price, reasoning, include_reasoning`
+* **Pass-through only**: `providers, sort, fallbacks, max_price, reasoning`
 * **Models**: prefer `sdk.models.list()`, fall back to raw HTTP only if needed
 
 ## Tools (MCP-first)
@@ -28,7 +28,7 @@
 ## Reasoning Models
 
 * Use **Chat Completions** on OpenRouter
-* Request thinking tokens via `reasoning={...}` / `include_reasoning`
+* Request thinking tokens via `reasoning={...}`
 * Stream typed frames:
 
   * `reasoning` → `event: reasoning`
