@@ -332,26 +332,44 @@ def _extract_reasoning_capability(model_obj: dict[str, Any]) -> bool:
     """Best-effort detection whether a model supports reasoning."""
     # model_obj is guaranteed to be a dict (or empty dict) by the caller
 
+    model_id = model_obj.get("id", "")
+    
+    # Special case: OpenAI o1/o3 models support reasoning_effort even if not in supported_parameters
+    if model_id.startswith("openai/") and any(x in model_id.lower() for x in ["o1", "o3"]):
+        return True
+
+    # Check supported_parameters for reasoning-related parameters (primary method)
+    supported_params = model_obj.get("supported_parameters", [])
+    if isinstance(supported_params, list) and any(
+        param in supported_params for param in ["reasoning", "reasoning_effort", "include_reasoning"]
+    ):
+        return True
+
+    # Check capabilities
     caps = model_obj.get("capabilities") or {}
     if isinstance(caps, dict) and bool(caps.get("reasoning")):
         return True
 
+    # Check features
     features = model_obj.get("features")
     if isinstance(features, list) and any(
         isinstance(f, str) and f.lower() in {"reasoning", "chain_of_thought"} for f in features
     ):
         return True
 
+    # Check tags
     tags = model_obj.get("tags")
     if isinstance(tags, list) and any(
         isinstance(t, str) and "reasoning" in t.lower() for t in tags
     ):
         return True
 
+    # Check topology
     topology = model_obj.get("topology")
     if isinstance(topology, str) and topology.lower() in {"reasoning", "reasoner"}:
         return True
 
+    # Check modalities and types
     for key in ("modalities", "types"):
         val = model_obj.get(key)
         if isinstance(val, list) and any(
