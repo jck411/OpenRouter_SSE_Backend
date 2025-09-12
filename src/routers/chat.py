@@ -49,6 +49,18 @@ SSE_HEADERS = {
 
 
 def _csv_to_list(value: str | None) -> list[str] | None:
+    """Convert a comma-separated string to a list of non-empty strings.
+
+    Args:
+        value: Comma-separated string or None
+
+    Returns:
+        List of trimmed, non-empty strings, or None if input is empty/None
+
+    Example:
+        _csv_to_list("a, b , c") -> ["a", "b", "c"]
+        _csv_to_list("") -> None
+    """
     if not value:
         return None
     out = [v.strip() for v in value.split(",")]
@@ -56,7 +68,21 @@ def _csv_to_list(value: str | None) -> list[str] | None:
 
 
 def _json_loads_or_passthrough(s: str | None) -> Any | None:
-    """Try json.loads; if that fails, return original string (or None)."""
+    """Attempt to parse a string as JSON, returning the original string if parsing fails.
+
+    This is a lenient JSON parser that gracefully handles non-JSON strings.
+
+    Args:
+        s: String that might be JSON, or None
+
+    Returns:
+        Parsed JSON object/array/primitive, original string, or None
+
+    Example:
+        _json_loads_or_passthrough('{"key": "value"}') -> {"key": "value"}
+        _json_loads_or_passthrough('plain text') -> 'plain text'
+        _json_loads_or_passthrough(None) -> None
+    """
     if s is None:
         return None
     try:
@@ -68,9 +94,26 @@ def _json_loads_or_passthrough(s: str | None) -> Any | None:
 def _strict_json_or_error(
     param_value: str | None, param_name: str
 ) -> tuple[bool, Any | None, str | None]:
-    """If value looks like JSON (starts with '{' or '['), require valid JSON.
-    Otherwise, pass through unchanged.
-    Returns (ok, value_or_none, error_message_or_none).
+    """Validate JSON-looking strings with strict parsing requirements.
+
+    If a string starts with '{' or '[', it's treated as JSON and must parse correctly.
+    Otherwise, the string is passed through unchanged. This prevents silent failures
+    where malformed JSON parameters would be ignored.
+
+    Args:
+        param_value: The parameter value to validate
+        param_name: Name of the parameter (for error messages)
+
+    Returns:
+        Tuple of (success, parsed_value_or_original, error_message)
+        - success: True if validation passed
+        - parsed_value_or_original: Parsed JSON or original string
+        - error_message: None on success, error description on failure
+
+    Example:
+        _strict_json_or_error('{"valid": true}', 'test') -> (True, {"valid": True}, None)
+        _strict_json_or_error('{invalid}', 'test') -> (False, None, "Malformed JSON...")
+        _strict_json_or_error('plain text', 'test') -> (True, 'plain text', None)
     """
     if param_value is None:
         return True, None, None
@@ -87,8 +130,21 @@ def _strict_json_or_error(
 
 
 def _format_sse_event(event_type: str, data: Any) -> str:
-    """Format data as Server-Sent Events (SSE).
-    If data is dict/list, JSON-encode; then emit one 'data:' per line.
+    """Format data as a Server-Sent Events (SSE) message.
+
+    Converts arbitrary data into proper SSE format with event type and data payload.
+    Handles multi-line data by prefixing each line with 'data:' as required by SSE spec.
+
+    Args:
+        event_type: The SSE event type (e.g., 'content', 'reasoning', 'error')
+        data: Data to include in the event (will be JSON-encoded if dict/list)
+
+    Returns:
+        Properly formatted SSE event string ending with double newline
+
+    Example:
+        _format_sse_event('content', {'text': 'hello'}) ->
+        "event: content\ndata: {\"text\": \"hello\"}\n\n"
     """
     payload = json.dumps(data) if isinstance(data, dict | list) else str(data)
     # SSE requires each line to start with 'data:'; split to be robust to newlines
@@ -101,12 +157,40 @@ def _format_sse_event(event_type: str, data: Any) -> str:
 
 
 def _format_sse_error(error_message: str, error_type: str = "error") -> str:
-    """Format error as SSE event with structured data."""
+    """Format an error message as a structured SSE event.
+
+    Creates a standardized error event with both human-readable message and error type
+    for programmatic handling by clients.
+
+    Args:
+        error_message: Human-readable error description
+        error_type: Error category/type for client logic (default: "error")
+
+    Returns:
+        SSE-formatted error event
+
+    Example:
+        _format_sse_error("Invalid JSON", "bad_request") ->
+        "event: error\ndata: {\"error\": \"Invalid JSON\", \"type\": \"bad_request\"}\n\n"
+    """
     return _format_sse_event("error", {"error": error_message, "type": error_type})
 
 
 def _to_openrouter_messages(history: list[Message]) -> list[OpenRouterMessage]:
-    """Convert API message history to OpenRouter messages."""
+    """Convert API message history to OpenRouter message format.
+
+    Transforms the external API message format (with 'model' role) to OpenRouter's
+    expected format (with 'assistant' role).
+
+    Args:
+        history: List of Message objects from the API request
+
+    Returns:
+        List of OpenRouterMessage objects compatible with OpenRouter API
+
+    Note:
+        Maps 'model' role to 'assistant' role as required by OpenRouter
+    """
     out: list[OpenRouterMessage] = []
     for m in history:
         if m.role == "user":
@@ -123,7 +207,9 @@ def _to_openrouter_messages(history: list[Message]) -> list[OpenRouterMessage]:
 async def chat(
     req: ChatRequest,
     # OpenRouter routing & cost controls:
-    sort: str | None = Query(None, description="OpenRouter sort strategy (e.g. throughput, price)"),
+    sort: str | None = Query(
+        None, description="OpenRouter provider sort strategy (price, throughput, latency, default)"
+    ),
     providers: str | None = Query(None, description="CSV list of preferred providers"),
     max_price: float | None = Query(None, ge=0, description="Maximum cost per request"),
     fallbacks: str | None = Query(None, description="CSV list of fallback models"),
@@ -173,13 +259,71 @@ async def chat(
     ),
 ) -> StreamingResponse:
     """
-    Streams assistant response as Server-Sent Events (SSE) with structured data.
+    Stream AI assistant responses as Server-Sent Events (SSE) with real-time delivery.
 
-    SSE Events:
-    - event: reasoning - streaming reasoning deltas {"text": "..."}
-    - event: content   - streaming content deltas   {"text": "..."}
-    - event: error     - structured error           {"error": "...", "type": "..."}
-    - event: done      - completion signal          {"completed": true}
+    This endpoint handles chat conversations with support for:
+    - Streaming content and reasoning traces
+    - OpenRouter model routing and cost controls
+    - Advanced model parameters (temperature, top-p, etc.)
+    - Tool calling and function execution
+    - Web search integration (via :online model variants)
+    - Automatic reasoning detection and configuration
+
+    The response streams different event types:
+    - `reasoning`: Thinking/reasoning process deltas (for capable models)
+    - `content`: Actual response content deltas
+    - `usage`: Final metrics (timing, tokens, routing info)
+    - `error`: Structured error information
+    - `done`: Completion signal
+
+    Args:
+        req: Chat request with message history and new user message
+        sort: OpenRouter provider selection strategy (price, throughput, latency, etc.)
+        providers: Comma-separated list of preferred providers
+        max_price: Maximum cost limit per request
+        fallbacks: Comma-separated list of fallback models
+        require_parameters: Ensure all providers support all parameters
+        temperature: Response randomness (0.0 = deterministic, 2.0 = very random)
+        top_p: Nucleus sampling threshold
+        top_k: Limit to top K tokens
+        frequency_penalty: Reduce token repetition
+        presence_penalty: Encourage topic diversity
+        repetition_penalty: Alternative repetition control
+        min_p: Minimum probability threshold
+        top_a: Alternative sampling method
+        seed: Reproducibility seed
+        max_tokens: Maximum response length
+        stop: Stop sequences (string or JSON array)
+        logit_bias: Token probability adjustments (JSON object)
+        logprobs: Include log probabilities in response
+        top_logprobs: Number of top log probabilities to return
+        response_format: Output format constraints (JSON schema)
+        tools: Available tools for function calling (JSON array)
+        tool_choice: Tool selection strategy
+        reasoning_effort: Reasoning depth for capable models
+        reasoning_max_tokens: Limit reasoning token usage
+        reasoning_exclude: Hide reasoning from response
+        include_reasoning: Include reasoning in content stream
+        disable_reasoning: Force disable all reasoning features
+
+    Returns:
+        StreamingResponse with SSE events containing response data
+
+    Raises:
+        HTTPException: For invalid requests (400) or server errors (500+)
+
+    Example SSE Events:
+        event: reasoning
+        data: {"text": "Let me think about this..."}
+
+        event: content
+        data: {"text": "Hello! How can I help you?"}
+
+        event: usage
+        data: {"model": "anthropic/claude-3-sonnet", "duration_ms": 1500, ...}
+
+        event: done
+        data: {"completed": true}
     """
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Empty message")

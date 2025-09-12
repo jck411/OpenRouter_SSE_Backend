@@ -280,6 +280,8 @@ async def simple_chat_completion(
                 messages=messages,  # type: ignore[arg-type]
                 stream=False,
             )
+            # Since stream=False, response is definitely ChatCompletion
+            assert hasattr(response, "choices"), "Expected ChatCompletion response"
             return response.choices[0].message.content or ""
     except TimeoutError:
         return f"Error: Operation timed out after {timeout or settings.api_timeout}s"
@@ -299,7 +301,7 @@ async def get_models_list() -> list[dict[str, Any]]:
                 models_data.append(m.model_dump())
             else:
                 # Convert to dict safely
-                models_data.append(dict(m))  # type: ignore[call-overload]
+                models_data.append(dict(m))
         return models_data
     except Exception:
         return []
@@ -328,8 +330,7 @@ async def model_supports_reasoning(model_id: str) -> bool:
 
 def _extract_reasoning_capability(model_obj: dict[str, Any]) -> bool:
     """Best-effort detection whether a model supports reasoning."""
-    if not isinstance(model_obj, dict):
-        return False
+    # model_obj is guaranteed to be a dict (or empty dict) by the caller
 
     caps = model_obj.get("capabilities") or {}
     if isinstance(caps, dict) and bool(caps.get("reasoning")):

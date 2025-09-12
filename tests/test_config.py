@@ -15,7 +15,7 @@ def _create_test_settings() -> Settings:
     Pylance incorrectly flags this as missing arguments, but BaseSettings
     gets values from environment variables when properly configured.
     """
-    return Settings()  # type: ignore
+    return Settings()
 
 
 class TestSettings:

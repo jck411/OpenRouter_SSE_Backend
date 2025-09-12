@@ -75,6 +75,15 @@ class ModelDetailsResponse(BaseModel):
     endpoints: list[dict[str, Any]] | None = Field(
         None, description="Available endpoints for this model"
     )
+    provider_parameter_union: list[str] | None = Field(
+        None, description="Union of parameters supported across all providers"
+    )
+    provider_parameter_intersection: list[str] | None = Field(
+        None, description="Parameters supported by ALL providers (intersection)"
+    )
+    provider_parameter_details: dict[str, list[str]] | None = Field(
+        None, description="Parameters supported by each provider"
+    )
 
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -250,6 +259,70 @@ def _model_matches_filters(model: dict[str, Any], filters: ModelSearchFilters) -
                 return False
 
     return True
+
+
+def _get_model_provider_parameter_analysis(
+    endpoints: list[dict[str, Any]] | None, base_supported_parameters: list[str] | None
+) -> dict[str, Any]:
+    """Get comprehensive parameter support analysis for a model from its endpoints.
+
+    Args:
+        endpoints: List of provider endpoint information
+        base_supported_parameters: Base model-level supported parameters
+
+    Returns:
+        Dict containing union, intersection, and provider-specific parameter details
+    """
+    # Start with base model parameters
+    base_params = set(base_supported_parameters or [])
+
+    # If no endpoints, return base parameters
+    if not endpoints:
+        return {
+            "union": sorted(base_params),
+            "intersection": sorted(base_params),
+            "provider_details": {},
+        }
+
+    # Collect parameters from all provider endpoints
+    all_provider_params = []
+    provider_details = {}
+
+    for endpoint in endpoints:
+        if isinstance(endpoint, dict):
+            # Try different possible provider name fields
+            provider_name = (
+                endpoint.get("provider")
+                or endpoint.get("provider_name")
+                or endpoint.get("name")
+                or "unknown"
+            )
+
+            # Get supported parameters for this provider
+            provider_params = endpoint.get("supported_parameters", [])
+            if isinstance(provider_params, list):
+                provider_param_set = set(provider_params)
+                # Merge with base parameters for this provider
+                combined_params = base_params | provider_param_set
+                all_provider_params.append(combined_params)
+                provider_details[provider_name] = sorted(combined_params)
+
+    # Calculate union and intersection
+    if all_provider_params:
+        union_params = set.union(*all_provider_params) if all_provider_params else base_params
+        intersection_params = (
+            set.intersection(*all_provider_params) if all_provider_params else base_params
+        )
+    else:
+        # Fallback to base parameters
+        union_params = base_params
+        intersection_params = base_params
+
+    return {
+        "union": sorted(union_params),
+        "intersection": sorted(intersection_params),
+        "provider_details": provider_details,
+    }
 
 
 def _sort_models(models: list[dict[str, Any]], sort_by: SortOptions) -> list[dict[str, Any]]:
@@ -523,6 +596,11 @@ async def get_model_details(model_id: str) -> ModelDetailsResponse:
             # If endpoints call fails, continue without it - not all models may support this
             pass
 
+        # Analyze provider parameter support
+        parameter_analysis = _get_model_provider_parameter_analysis(
+            endpoints_info, target_model.get("supported_parameters")
+        )
+
         # Build the detailed response
         # Ensure required fields have safe fallbacks
         model_id_value = target_model.get("id") or model_id
@@ -539,6 +617,9 @@ async def get_model_details(model_id: str) -> ModelDetailsResponse:
             created=target_model.get("created"),
             provider_name=target_model.get("provider_name"),
             endpoints=endpoints_info,
+            provider_parameter_union=parameter_analysis["union"],
+            provider_parameter_intersection=parameter_analysis["intersection"],
+            provider_parameter_details=parameter_analysis["provider_details"],
         )
     except APITimeoutError as e:
         raise HTTPException(status_code=504, detail="OpenRouter API timeout") from e

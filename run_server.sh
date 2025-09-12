@@ -4,13 +4,13 @@
 cd "$(dirname "$0")"
 
 echo "🚀 Starting OpenRouter SSE Backend..."
-echo "📁 Using virtual environment: backend/"
+echo "📁 Using virtual environment: .venv/"
 
 # Activate virtual environment if not already activated
-if [[ "$VIRTUAL_ENV" != *"backend"* ]]; then
+if [[ "$VIRTUAL_ENV" != *".venv"* ]]; then
     echo "🔧 Activating virtual environment..."
-    source backend/bin/activate
+    source .venv/bin/activate
 fi
 
 # Run the server
-backend/bin/openrouter-server
+.venv/bin/openrouter-server

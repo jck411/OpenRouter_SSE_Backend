@@ -3,7 +3,9 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_disable_reasoning_prevents_reasoning_path(async_client: AsyncClient, monkeypatch):
+async def test_disable_reasoning_prevents_reasoning_path(
+    async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """When disable_reasoning=true, backend should not attempt reasoning pathway.
 
     We monkeypatch `_model_supports_reasoning` to always return True so the auto-enable
@@ -33,7 +35,9 @@ async def test_disable_reasoning_prevents_reasoning_path(async_client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_reasoning_auto_enabled_without_disable(async_client: AsyncClient, monkeypatch):
+async def test_reasoning_auto_enabled_without_disable(
+    async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """When model supports reasoning and disable_reasoning is not set, the code should choose
     the reasoning-capable (raw SSE) pathway; we detect this by the presence of 'event: content' or
     'event: reasoning' markers in a 200 response. We can't force upstream reasoning frames, but

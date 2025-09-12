@@ -278,6 +278,13 @@ class ChatApp {
             }
             const info = await resp.json();
 
+            // Store provider parameter union for parameter visibility
+            if (info.provider_parameter_union) {
+                this.modelCapabilities[this.currentModel] = info.provider_parameter_union;
+                // Update parameter visibility when we get fresh model details
+                this.updateParameterVisibility();
+            }
+
             const parts = [];
             if (info.description) {
                 parts.push(`<p>${this.escapeHtml(info.description)}</p>`);
@@ -294,8 +301,27 @@ class ChatApp {
                 parts.push(`<p class="muted">${meta.map(this.escapeHtml).join(' · ')}</p>`);
             }
 
+            // Show provider parameter union info
+            if (info.provider_parameter_union && info.provider_parameter_union.length) {
+                parts.push(`<p><strong>Supported Parameters (Union):</strong> ${info.provider_parameter_union.map(this.escapeHtml).join(', ')}</p>`);
+            }
+
+            // Show provider parameter intersection if different from union
+            if (info.provider_parameter_intersection && info.provider_parameter_intersection.length &&
+                JSON.stringify(info.provider_parameter_intersection) !== JSON.stringify(info.provider_parameter_union)) {
+                parts.push(`<p><strong>Parameters Supported by ALL Providers:</strong> ${info.provider_parameter_intersection.map(this.escapeHtml).join(', ')}</p>`);
+            }
+
+            // Show provider-specific parameter details
+            if (info.provider_parameter_details && Object.keys(info.provider_parameter_details).length > 0) {
+                const providerItems = Object.entries(info.provider_parameter_details).map(([provider, params]) => {
+                    return `<li><strong>${this.escapeHtml(provider)}:</strong> ${params.map(this.escapeHtml).join(', ')}</li>`;
+                }).join('');
+                parts.push(`<div><strong>Provider-Specific Parameters:</strong><ul style="margin-left:1rem;">${providerItems}</ul></div>`);
+            }
+
             if (info.supported_parameters && Array.isArray(info.supported_parameters) && info.supported_parameters.length) {
-                parts.push(`<p><strong>Supported Parameters:</strong> ${info.supported_parameters.map(this.escapeHtml).join(', ')}</p>`);
+                parts.push(`<p><strong>Base Model Parameters:</strong> ${info.supported_parameters.map(this.escapeHtml).join(', ')}</p>`);
             }
 
             if (info.endpoints && Array.isArray(info.endpoints) && info.endpoints.length) {
@@ -359,7 +385,7 @@ class ChatApp {
         });
     }
 
-    updateParameterVisibility() {
+    async updateParameterVisibility() {
         if (!this.currentModel) {
             // No model selected - show all parameters
             this.showAllParameters();
@@ -367,16 +393,36 @@ class ChatApp {
             return;
         }
 
-        const supportedParams = this.modelCapabilities[this.currentModel];
+        // Try to get provider parameter union from cache first
+        let supportedParams = this.modelCapabilities[this.currentModel];
+
+        // If not in cache or if it's the old fallback, fetch fresh model details
+        if (!supportedParams || supportedParams === 'all') {
+            try {
+                console.log(`Fetching model details for parameter visibility: ${this.currentModel}`);
+                const resp = await fetch(`${this.baseUrl}/models/${encodeURIComponent(this.currentModel)}`);
+                if (resp.ok) {
+                    const info = await resp.json();
+                    if (info.provider_parameter_union && Array.isArray(info.provider_parameter_union)) {
+                        supportedParams = info.provider_parameter_union;
+                        // Cache the result
+                        this.modelCapabilities[this.currentModel] = supportedParams;
+                        console.log(`Cached provider parameter union for ${this.currentModel}:`, supportedParams);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch model details for parameter visibility:', error);
+            }
+        }
 
         if (!supportedParams || supportedParams === 'all') {
-            // Model not found or supports all parameters - show everything
+            // Fallback: model not found or supports all parameters - show everything
             this.showAllParameters();
             this.paramFilterInfo.classList.add('hidden');
             return;
         }
 
-        console.log(`Model ${this.currentModel} supports:`, supportedParams);
+        console.log(`Model ${this.currentModel} provider parameter union:`, supportedParams);
 
         // Show filter info when filtering parameters
         this.paramFilterInfo.classList.remove('hidden');
@@ -410,22 +456,23 @@ class ChatApp {
             'reasoning-effort': 'reasoning_effort',
             'reasoning-max-tokens': 'reasoning_max_tokens',
             'reasoning-exclude': 'reasoning_exclude',
-            'include-reasoning': 'include_reasoning'
+            'include-reasoning': 'include_reasoning',
+            'disable-reasoning': 'disable_reasoning'  // Maps to backend disable_reasoning parameter
         };
 
-        // Show/hide parameters based on model support
+        // Show/hide parameters based on provider parameter union
         Object.entries(parameterMappings).forEach(([elementId, paramName]) => {
             const paramRow = document.getElementById(elementId)?.closest('.param-row');
             if (paramRow) {
                 let shouldShow = false;
 
                 // For reasoning parameters, show if model supports any reasoning capability
-                if (['reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'include_reasoning'].includes(paramName)) {
+                if (['reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'include_reasoning', 'disable_reasoning'].includes(paramName)) {
                     shouldShow = supportedParams.some(param =>
-                        ['reasoning', 'include_reasoning', 'reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude'].includes(param)
+                        ['reasoning', 'include_reasoning', 'reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'disable_reasoning'].includes(param)
                     );
                 } else {
-                    // For other parameters, exact match required
+                    // For other parameters, check if it's in the provider parameter union
                     shouldShow = supportedParams.includes(paramName);
                 }
 
