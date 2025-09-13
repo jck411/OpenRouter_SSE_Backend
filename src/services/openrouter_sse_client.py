@@ -32,7 +32,7 @@ class OpenRouterMessage(TypedDict):
 
 
 class SSEEvent(TypedDict):
-    type: Literal["reasoning", "content", "error", "done"]
+    type: Literal["reasoning", "content", "error", "done", "usage"]
     data: dict[str, Any]
 
 
@@ -82,6 +82,7 @@ async def stream_chat_completion(
     Yields SSEEvent objects:
     - type: "reasoning" → data: {"text": "thinking..."}
     - type: "content" → data: {"text": "response..."}
+    - type: "usage" → data: {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N}
     - type: "error" → data: {"error": "...", "type": "..."}
     - type: "done" → data: {"completed": True}
     """
@@ -90,6 +91,8 @@ async def stream_chat_completion(
         "model": model,
         "messages": messages,
         "stream": True,
+        # Enable usage accounting to get cost and detailed usage information
+        "usage": {"include": True},
     }
 
     # Add OpenRouter routing controls
@@ -230,6 +233,16 @@ async def stream_chat_completion(
                                     tok_content = tok.get("content")
                                     if tok_content:
                                         yield SSEEvent(type="reasoning", data={"text": tok_content})
+
+                # Check for usage information in the frame
+                usage = frame.get("usage")
+                if usage and isinstance(usage, dict):
+                    # Include provider information from the frame level
+                    enhanced_usage = dict(usage)
+                    if "provider" in frame:
+                        enhanced_usage["provider"] = frame["provider"]
+                    # Forward the enhanced usage information as a separate event
+                    yield SSEEvent(type="usage", data=enhanced_usage)
 
         yield SSEEvent(type="done", data={"completed": True})
 

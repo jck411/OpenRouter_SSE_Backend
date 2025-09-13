@@ -400,6 +400,21 @@ async def chat(
         content_events = 0
         total_reasoning_chars = 0
         total_content_chars = 0
+        # Enhanced usage tracking - capture tokens, costs, and metadata
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+        total_tokens: int | None = None
+        cost: float | None = None
+        provider: str | None = None
+        # Detailed token breakdowns
+        cached_tokens: int | None = None
+        reasoning_tokens: int | None = None
+        audio_tokens: int | None = None
+        image_tokens: int | None = None
+        # Cost breakdowns
+        prompt_cost: float | None = None
+        completion_cost: float | None = None
+        is_byok: bool | None = None
         try:
             async for event in stream_chat_completion(
                 messages=messages,
@@ -441,11 +456,44 @@ async def chat(
                     total_content_chars += len(txt)
                     content_events += 1
                     yield _format_sse_event("content", event["data"])
+                elif event["type"] == "usage":
+                    # Capture enhanced usage data from OpenRouter (with usage accounting enabled)
+                    usage_data = event.get("data", {})
+
+                    # Basic token counts
+                    input_tokens = usage_data.get("prompt_tokens")
+                    output_tokens = usage_data.get("completion_tokens")
+                    total_tokens = usage_data.get("total_tokens")
+
+                    # Cost information
+                    cost = usage_data.get("cost")
+                    is_byok = usage_data.get("is_byok")
+
+                    # Provider information (included from frame level)
+                    provider = usage_data.get("provider")
+
+                    # Detailed token breakdowns
+                    prompt_details = usage_data.get("prompt_tokens_details", {})
+                    cached_tokens = prompt_details.get("cached_tokens")
+                    audio_tokens = prompt_details.get("audio_tokens")
+
+                    completion_details = usage_data.get("completion_tokens_details", {})
+                    reasoning_tokens = completion_details.get("reasoning_tokens")
+                    image_tokens = completion_details.get("image_tokens")
+
+                    # Cost breakdowns
+                    cost_details = usage_data.get("cost_details", {})
+                    prompt_cost = cost_details.get("upstream_inference_prompt_cost")
+                    completion_cost = cost_details.get("upstream_inference_completions_cost")
+
+                    # Note: We don't forward usage events to the client here,
+                    # they'll be included in the final usage event before done
                 elif event["type"] == "error":
                     yield _format_sse_event("error", event["data"])
                 elif event["type"] == "done":
                     # Emit final usage/meta event before done
                     duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+
                     usage_payload = {
                         "model": final_model,
                         "duration_ms": duration_ms,
@@ -453,9 +501,21 @@ async def chat(
                         "content_events": content_events,
                         "reasoning_chars": total_reasoning_chars,
                         "content_chars": total_content_chars,
-                        # Placeholders for tokens; upstream does not include them in SSE
-                        "input_tokens": None,
-                        "output_tokens": None,
+                        # Token usage from OpenRouter streaming response
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": total_tokens,
+                        # Cost information (in OpenRouter credits)
+                        "cost": cost,
+                        "prompt_cost": prompt_cost,
+                        "completion_cost": completion_cost,
+                        "is_byok": is_byok,
+                        # Provider and detailed token information
+                        "provider": provider,
+                        "cached_tokens": cached_tokens,
+                        "reasoning_tokens": reasoning_tokens,
+                        "audio_tokens": audio_tokens,
+                        "image_tokens": image_tokens,
                         # Echo core routing knobs for observability
                         "routing": {
                             "providers": providers_list,
