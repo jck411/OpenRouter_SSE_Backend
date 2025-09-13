@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -40,29 +41,32 @@ class ChatRequest(BaseModel):
 
 # ---------- Utilities ----------
 
+# -------- Constants --------
+
+# Default headers for SSE streams. Adding an explicit content-type prevents
+# some proxies/browsers from buffering.
 SSE_HEADERS = {
-    # Reduce buffering by proxies / Nginx
-    "Cache-Control": "no-cache",
-    "X-Accel-Buffering": "no",
-    # Browsers add Connection: keep-alive automatically; safe to omit
+    "Cache-Control": "no-cache",  # Reduce proxy buffering
+    "X-Accel-Buffering": "no",  # Disable Nginx buffering
+    "Content-Type": "text/event-stream; charset=utf-8",  # Explicit MIME type
 }
 
 
-def _csv_to_list(value: str | None) -> list[str] | None:
+def _csv_to_list(value: str | None) -> list[str]:
     """Convert a comma-separated string to a list of non-empty strings.
 
     Args:
         value: Comma-separated string or None
 
     Returns:
-        List of trimmed, non-empty strings, or None if input is empty/None
+        List of trimmed, non-empty strings. Returns [] if input is empty/None.
 
     Example:
         _csv_to_list("a, b , c") -> ["a", "b", "c"]
-        _csv_to_list("") -> None
+        _csv_to_list("") -> []
     """
     if not value:
-        return None
+        return []
     out = [v.strip() for v in value.split(",")]
     return [v for v in out if v]
 
@@ -129,6 +133,15 @@ def _strict_json_or_error(
     return True, param_value, None
 
 
+def _sanitize_sse_line(line: str) -> str:
+    """Sanitize a single SSE line.
+
+    Lines starting with ':' are treated by browsers as comments and dropped.
+    Prefix with a space to preserve user content starting with ':'.
+    """
+    return f" {line}" if line.startswith(":") else line
+
+
 def _format_sse_event(event_type: str, data: Any) -> str:
     """Format data as a Server-Sent Events (SSE) message.
 
@@ -151,7 +164,7 @@ def _format_sse_event(event_type: str, data: Any) -> str:
     lines = payload.splitlines() or [""]
     buf = [f"event: {event_type}"]
     for ln in lines:
-        buf.append(f"data: {ln}")
+        buf.append(f"data: {_sanitize_sse_line(ln)}")
     buf.append("")  # blank line terminator
     return "\n".join(buf) + "\n"
 
@@ -349,7 +362,7 @@ async def chat(
         reasoning = r
     else:
         # If the model supports reasoning (and caller didn't specify), opt-in with a sensible default.
-        if not disable_reasoning and await model_supports_reasoning(final_model):
+        if not disable_reasoning and await _supports_reasoning_cached(final_model):
             reasoning = {"effort": "high"}
 
     # Explicit override: disable reasoning completely
@@ -527,8 +540,8 @@ async def chat(
                         },
                     }
                     # Emit usage log (structured) with a request correlation id
-                    # For simplicity, use id() of messages list as a lightweight request_id surrogate
-                    request_id = f"req-{id(messages)}"
+                    # Use cryptographically-strong, process-global unique id
+                    request_id = f"req-{uuid.uuid4().hex}"
                     log.info(
                         "chat_usage",
                         request_id=request_id,
@@ -546,3 +559,19 @@ async def chat(
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+# ---------- Caching ----------
+
+# Model-capability queries add a network RTT. Cache for 1 hour.
+_REASONING_CACHE_TTL = 60 * 60
+_reasoning_cache: dict[str, tuple[bool, float]] = {}
+
+
+async def _supports_reasoning_cached(model: str) -> bool:
+    now = time.monotonic()
+    hit = _reasoning_cache.get(model)
+    if hit and (now - hit[1] < _REASONING_CACHE_TTL):
+        return hit[0]
+    value = await model_supports_reasoning(model)
+    _reasoning_cache[model] = (value, now)
+    return value
