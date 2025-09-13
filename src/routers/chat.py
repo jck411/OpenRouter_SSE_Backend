@@ -406,6 +406,7 @@ async def chat(
         total_tokens: int | None = None
         cost: float | None = None
         provider: str | None = None
+        actual_model: str | None = None  # The actual model selected by OpenRouter
         # Detailed token breakdowns
         cached_tokens: int | None = None
         reasoning_tokens: int | None = None
@@ -469,8 +470,9 @@ async def chat(
                     cost = usage_data.get("cost")
                     is_byok = usage_data.get("is_byok")
 
-                    # Provider information (included from frame level)
+                    # Provider and actual model information (included from frame level)
                     provider = usage_data.get("provider")
+                    actual_model = usage_data.get("actual_model")
 
                     # Detailed token breakdowns
                     prompt_details = usage_data.get("prompt_tokens_details", {})
@@ -495,7 +497,8 @@ async def chat(
                     duration_ms = int((time.monotonic() - started_monotonic) * 1000)
 
                     usage_payload = {
-                        "model": final_model,
+                        "model": final_model,  # The requested model (e.g., "openrouter/auto")
+                        "actual_model": actual_model,  # The actual model selected by OpenRouter
                         "duration_ms": duration_ms,
                         "reasoning_events": reasoning_events,
                         "content_events": content_events,

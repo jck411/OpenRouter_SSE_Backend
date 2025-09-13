@@ -237,10 +237,22 @@ async def stream_chat_completion(
                 # Check for usage information in the frame
                 usage = frame.get("usage")
                 if usage and isinstance(usage, dict):
-                    # Include provider information from the frame level
+                    # Include provider and actual model information from the frame level
                     enhanced_usage = dict(usage)
                     if "provider" in frame:
                         enhanced_usage["provider"] = frame["provider"]
+                    # Capture the actual model selected by OpenRouter (important for auto routing)
+                    # Check multiple possible locations for the actual model
+                    actual_model = None
+                    if "model" in frame:
+                        actual_model = frame["model"]
+                    elif "model" in usage:
+                        actual_model = usage["model"]
+
+                    if actual_model:
+                        enhanced_usage["actual_model"] = actual_model
+
+
                     # Forward the enhanced usage information as a separate event
                     yield SSEEvent(type="usage", data=enhanced_usage)
 
