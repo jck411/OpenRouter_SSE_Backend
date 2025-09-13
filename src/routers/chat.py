@@ -398,11 +398,10 @@ async def chat(
         started_monotonic = time.monotonic()
         reasoning_events = 0
         content_events = 0
-        total_reasoning_chars = 0
-        total_content_chars = 0
         # Enhanced usage tracking - capture tokens, costs, and metadata
-        input_tokens: int | None = None
-        output_tokens: int | None = None
+        # Use OpenRouter's native token fields
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
         total_tokens: int | None = None
         cost: float | None = None
         provider: str | None = None
@@ -448,13 +447,9 @@ async def chat(
                 tool_choice=parsed_tool_choice,
             ):
                 if event["type"] == "reasoning":
-                    txt = str((event.get("data") or {}).get("text", ""))
-                    total_reasoning_chars += len(txt)
                     reasoning_events += 1
                     yield _format_sse_event("reasoning", event["data"])
                 elif event["type"] == "content":
-                    txt = str((event.get("data") or {}).get("text", ""))
-                    total_content_chars += len(txt)
                     content_events += 1
                     yield _format_sse_event("content", event["data"])
                 elif event["type"] == "usage":
@@ -462,8 +457,8 @@ async def chat(
                     usage_data = event.get("data", {})
 
                     # Basic token counts
-                    input_tokens = usage_data.get("prompt_tokens")
-                    output_tokens = usage_data.get("completion_tokens")
+                    prompt_tokens = usage_data.get("prompt_tokens")
+                    completion_tokens = usage_data.get("completion_tokens")
                     total_tokens = usage_data.get("total_tokens")
 
                     # Cost information
@@ -495,6 +490,7 @@ async def chat(
                 elif event["type"] == "done":
                     # Emit final usage/meta event before done
                     duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+                    duration_s = max(duration_ms / 1000.0, 1e-6)
 
                     usage_payload = {
                         "model": final_model,  # The requested model (e.g., "openrouter/auto")
@@ -502,12 +498,14 @@ async def chat(
                         "duration_ms": duration_ms,
                         "reasoning_events": reasoning_events,
                         "content_events": content_events,
-                        "reasoning_chars": total_reasoning_chars,
-                        "content_chars": total_content_chars,
-                        # Token usage from OpenRouter streaming response
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
+                        # Token usage from OpenRouter streaming response (align with OpenRouter field names)
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
                         "total_tokens": total_tokens,
+                        # Simple derived rate metric
+                        "tokens_per_second": (
+                            (completion_tokens or 0) / duration_s if completion_tokens is not None else None
+                        ),
                         # Cost information (in OpenRouter credits)
                         "cost": cost,
                         "prompt_cost": prompt_cost,

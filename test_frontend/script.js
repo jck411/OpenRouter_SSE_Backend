@@ -1400,6 +1400,15 @@ class ChatApp {
             return tokens.toLocaleString();
         };
 
+        const formatRate = (rate) => {
+            if (rate === null || rate === undefined) return 'N/A';
+            try {
+                return `${Number(rate).toFixed(2)} tok/s`;
+            } catch {
+                return 'N/A';
+            }
+        };
+
         // Create modal HTML with clear data source separation
         const modalHTML = `
             <div id="usage-modal" class="modal-overlay">
@@ -1439,16 +1448,20 @@ class ChatApp {
                                 <h5>📊 Token Usage</h5>
                                 <div class="usage-grid">
                                     <div class="usage-item">
-                                        <span class="usage-label">Input Tokens:</span>
-                                        <span class="usage-value">${formatTokens(usage.input_tokens)}</span>
+                                        <span class="usage-label">Prompt Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.prompt_tokens)}</span>
                                     </div>
                                     <div class="usage-item">
-                                        <span class="usage-label">Output Tokens:</span>
-                                        <span class="usage-value">${formatTokens(usage.output_tokens)}</span>
+                                        <span class="usage-label">Completion Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.completion_tokens)}</span>
                                     </div>
                                     <div class="usage-item">
                                         <span class="usage-label">Total Tokens:</span>
                                         <span class="usage-value">${formatTokens(usage.total_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Tokens/sec:</span>
+                                        <span class="usage-value">${formatRate(usage.tokens_per_second)}</span>
                                     </div>
                                     <div class="usage-item">
                                         <span class="usage-label">Cached Tokens:</span>
@@ -1504,16 +1517,8 @@ class ChatApp {
                                         <span class="usage-value">${usage.content_events || 'N/A'}</span>
                                     </div>
                                     <div class="usage-item">
-                                        <span class="usage-label">Content Characters:</span>
-                                        <span class="usage-value">${usage.content_chars || 'N/A'}</span>
-                                    </div>
-                                    <div class="usage-item">
                                         <span class="usage-label">Reasoning Events:</span>
                                         <span class="usage-value">${usage.reasoning_events || 'N/A'}</span>
-                                    </div>
-                                    <div class="usage-item">
-                                        <span class="usage-label">Reasoning Characters:</span>
-                                        <span class="usage-value">${usage.reasoning_chars || 'N/A'}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1576,6 +1581,15 @@ class ChatApp {
             return tokens.toLocaleString();
         };
 
+        const formatRate = (rate) => {
+            if (rate === null || rate === undefined) return 'N/A';
+            try {
+                return `${Number(rate).toFixed(2)} tok/s`;
+            } catch {
+                return 'N/A';
+            }
+        };
+
         const modalId = `usage-modal-${messageId}`;
         const modalHTML = `
             <div id="${modalId}" class="modal-overlay">
@@ -1615,16 +1629,20 @@ class ChatApp {
                                 <h5>📊 Token Usage</h5>
                                 <div class="usage-grid">
                                     <div class="usage-item">
-                                        <span class="usage-label">Input Tokens:</span>
-                                        <span class="usage-value">${formatTokens(usage.input_tokens)}</span>
+                                        <span class="usage-label">Prompt Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.prompt_tokens)}</span>
                                     </div>
                                     <div class="usage-item">
-                                        <span class="usage-label">Output Tokens:</span>
-                                        <span class="usage-value">${formatTokens(usage.output_tokens)}</span>
+                                        <span class="usage-label">Completion Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.completion_tokens)}</span>
                                     </div>
                                     <div class="usage-item">
                                         <span class="usage-label">Total Tokens:</span>
                                         <span class="usage-value">${formatTokens(usage.total_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Tokens/sec:</span>
+                                        <span class="usage-value">${formatRate(usage.tokens_per_second)}</span>
                                     </div>
                                     <div class="usage-item">
                                         <span class="usage-label">Cached Tokens:</span>
@@ -1680,16 +1698,8 @@ class ChatApp {
                                         <span class="usage-value">${usage.content_events || 'N/A'}</span>
                                     </div>
                                     <div class="usage-item">
-                                        <span class="usage-label">Content Characters:</span>
-                                        <span class="usage-value">${usage.content_chars || 'N/A'}</span>
-                                    </div>
-                                    <div class="usage-item">
                                         <span class="usage-label">Reasoning Events:</span>
                                         <span class="usage-value">${usage.reasoning_events || 'N/A'}</span>
-                                    </div>
-                                    <div class="usage-item">
-                                        <span class="usage-label">Reasoning Characters:</span>
-                                        <span class="usage-value">${usage.reasoning_chars || 'N/A'}</span>
                                     </div>
                                 </div>
                             </div>
