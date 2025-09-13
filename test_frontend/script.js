@@ -6,7 +6,8 @@ class ChatApp {
         this.isStreaming = false;
         this.allModels = [];
         this.modelCapabilities = {}; // Store supported parameters for each model
-        this.currentUsageData = null; // Store usage data for current message
+        this.currentUsageData = null; // Store usage data for most recent message (for compatibility)
+        this.usageByMessageId = new Map(); // Store usage data per assistant message
 
         this.initializeElements();
         this.bindEvents();
@@ -993,7 +994,9 @@ class ChatApp {
         this.updateSendButton();
 
         try {
-            await this.handleStreamingResponse(requestBody);
+            // Create a unique id for this assistant turn
+            const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            await this.handleStreamingResponse(requestBody, messageId);
         } catch (error) {
             console.error('Chat request failed:', error);
             this.addMessage('error', `Request failed: ${error.message}`);
@@ -1003,7 +1006,7 @@ class ChatApp {
         }
     }
 
-    async handleStreamingResponse(requestBody) {
+    async handleStreamingResponse(requestBody, messageId) {
         const url = this.buildUrlWithParams();
         console.log('Sending request to:', url); // Debug log
 
@@ -1041,7 +1044,7 @@ class ChatApp {
 
                     // Create or update message element
                     if (!messageElement) {
-                        messageElement = this.addMessage('assistant', textChunk);
+                        messageElement = this.addMessage('assistant', textChunk, { messageId });
                     } else {
                         this.appendToMessage(messageElement, textChunk);
                     }
@@ -1059,12 +1062,31 @@ class ChatApp {
 
                     // Ensure message element exists and update reasoning
                     if (!messageElement) {
-                        messageElement = this.addMessage('assistant', '');
+                        messageElement = this.addMessage('assistant', '', { messageId });
                         console.log('🧠 Created new message element for reasoning');
                     }
 
                     console.log('🧠 Updating reasoning content, total length:', reasoningContent.length);
                     this.updateReasoningContent(messageElement, reasoningContent);
+                },
+                // Usage handler (per-stream, at end)
+                (usageData) => {
+                    // Store per-message usage
+                    this.usageByMessageId.set(messageId, usageData);
+                    this.currentUsageData = usageData; // keep latest for compatibility
+                    // Update the usage link state for this message
+                    const msgEl = this.messagesContainer.querySelector(`.message.assistant[data-message-id="${messageId}"]`);
+                    if (msgEl) {
+                        const link = msgEl.querySelector('.usage-details-link');
+                        if (link) {
+                            link.style.opacity = '1';
+                            link.textContent = '📊 Usage Details';
+                        }
+                    }
+                },
+                // Done handler (optional)
+                () => {
+                    // No-op for now
                 }
             );
 
@@ -1081,7 +1103,7 @@ class ChatApp {
         }
     }
 
-    async processServerSentEvents(response, onTextChunk, onReasoningChunk) {
+    async processServerSentEvents(response, onTextChunk, onReasoningChunk, onUsage, onDone) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -1102,7 +1124,7 @@ class ChatApp {
 
                     if (eventData.trim()) {
                         console.log('Processing SSE event:', eventData); // Debug log
-                        this.handleSSEEvent(eventData, onTextChunk, onReasoningChunk);
+                        this.handleSSEEvent(eventData, onTextChunk, onReasoningChunk, onUsage, onDone);
                     }
                 }
             }
@@ -1110,7 +1132,7 @@ class ChatApp {
             // Process any remaining data in buffer
             if (buffer.trim()) {
                 console.log('Processing remaining buffer:', buffer); // Debug log
-                this.handleSSEEvent(buffer, onTextChunk, onReasoningChunk);
+                this.handleSSEEvent(buffer, onTextChunk, onReasoningChunk, onUsage, onDone);
             }
 
         } finally {
@@ -1118,7 +1140,7 @@ class ChatApp {
         }
     }
 
-    handleSSEEvent(eventData, onTextChunk, onReasoningChunk) {
+    handleSSEEvent(eventData, onTextChunk, onReasoningChunk, onUsage, onDone) {
         const lines = eventData.split('\n').map(line => line.trim()).filter(line => line);
         let eventType = '';
         let data = '';
@@ -1164,14 +1186,18 @@ class ChatApp {
                     console.log('📊 Received usage event:', data);
                     if (data) {
                         const usageData = JSON.parse(data);
-                        this.currentUsageData = usageData;
-                        console.log('📊 Stored usage data:', usageData);
+                        this.currentUsageData = usageData; // keep latest for compatibility
+                        if (typeof onUsage === 'function') {
+                            onUsage(usageData);
+                        }
+                        console.log('📊 Stored usage data (latest):', usageData);
                     }
                     break;
 
                 case 'done':
                     // Stream completion - add usage details link if we have usage data
                     console.log('Stream completed');
+                    if (typeof onDone === 'function') onDone();
                     if (this.currentUsageData) {
                         console.log('📊 Stream completed with usage data:', this.currentUsageData);
                     }
@@ -1195,9 +1221,13 @@ class ChatApp {
         }
     }
 
-    addMessage(role, content) {
+    addMessage(role, content, options = {}) {
+        const { messageId = null } = options;
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
+        if (role === 'assistant' && messageId) {
+            messageDiv.setAttribute('data-message-id', messageId);
+        }
 
         // Add reasoning section for assistant messages (will be populated later if needed)
         if (role === 'assistant') {
@@ -1240,13 +1270,18 @@ class ChatApp {
             usageLink.style.cssText = 'margin-left: 10px; color: #007bff; text-decoration: none; font-size: 0.9em; opacity: 0.6; transition: opacity 0.3s ease;';
             usageLink.addEventListener('click', (e) => {
                 e.preventDefault();
-                this.showUsageModal();
+                if (messageId) {
+                    this.showUsageModalFor(messageId);
+                } else {
+                    // Fallback to latest if no id
+                    this.showUsageModal();
+                }
             });
             metaDiv.appendChild(usageLink);
 
             // Update link visibility when usage data becomes available
             const updateUsageLink = () => {
-                if (this.currentUsageData) {
+                if (messageId && this.usageByMessageId.has(messageId)) {
                     usageLink.style.opacity = '1';
                     usageLink.textContent = '📊 Usage Details';
                 } else {
@@ -1259,7 +1294,7 @@ class ChatApp {
             updateUsageLink();
             const checkInterval = setInterval(() => {
                 updateUsageLink();
-                if (this.currentUsageData) {
+                if (messageId && this.usageByMessageId.has(messageId)) {
                     clearInterval(checkInterval);
                 }
             }, 100);
@@ -1515,6 +1550,180 @@ class ChatApp {
 
         // Add click outside to close
         const modal = document.getElementById('usage-modal');
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+    }
+
+    // New: show usage modal for a specific assistant message
+    showUsageModalFor(messageId) {
+        const usage = this.usageByMessageId.get(messageId);
+        if (!usage) {
+            alert('No usage data available yet for this message.');
+            return;
+        }
+
+        // Format cost values for display
+        const formatCost = (cost) => {
+            if (cost === null || cost === undefined) return 'N/A';
+            return `$${cost.toFixed(8)}`;
+        };
+
+        const formatTokens = (tokens) => {
+            if (tokens === null || tokens === undefined) return 'N/A';
+            return tokens.toLocaleString();
+        };
+
+        const modalId = `usage-modal-${messageId}`;
+        const modalHTML = `
+            <div id="${modalId}" class="modal-overlay">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>📊 Usage Details</h3>
+                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="usage-section">
+                            <h4>🌐 OpenRouter Authoritative Data</h4>
+                            <p class="data-source-note">This data comes directly from OpenRouter's response and represents the authoritative billing and model information.</p>
+
+                            <div class="subsection">
+                                <h5>💰 Cost Information</h5>
+                                <div class="usage-grid">
+                                    <div class="usage-item">
+                                        <span class="usage-label">Total Cost:</span>
+                                        <span class="usage-value cost">${formatCost(usage.cost)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Prompt Cost:</span>
+                                        <span class="usage-value">${formatCost(usage.prompt_cost)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Completion Cost:</span>
+                                        <span class="usage-value">${formatCost(usage.completion_cost)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">BYOK:</span>
+                                        <span class="usage-value">${usage.is_byok ? 'Yes' : 'No'}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="subsection">
+                                <h5>📊 Token Usage</h5>
+                                <div class="usage-grid">
+                                    <div class="usage-item">
+                                        <span class="usage-label">Input Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.input_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Output Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.output_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Total Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.total_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Cached Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.cached_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Reasoning Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.reasoning_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Audio Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.audio_tokens)}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Image Tokens:</span>
+                                        <span class="usage-value">${formatTokens(usage.image_tokens)}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="subsection">
+                                <h5>🤖 Model & Provider Information</h5>
+                                <div class="usage-grid">
+                                    <div class="usage-item">
+                                        <span class="usage-label">Requested Model:</span>
+                                        <span class="usage-value">${usage.model || 'N/A'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Actual Model Used:</span>
+                                        <span class="usage-value ${usage.actual_model ? 'actual-model' : 'na-value'}">${usage.actual_model || 'Not provided by OpenRouter'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Provider:</span>
+                                        <span class="usage-value">${usage.provider || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="usage-section">
+                            <h4>📱 Application Metrics</h4>
+                            <p class="data-source-note">This data is collected by our application for performance monitoring and observability.</p>
+
+                            <div class="subsection">
+                                <h5>⏱️ Performance Metrics</h5>
+                                <div class="usage-grid">
+                                    <div class="usage-item">
+                                        <span class="usage-label">Request Duration:</span>
+                                        <span class="usage-value">${usage.duration_ms || 'N/A'}ms</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Content Events:</span>
+                                        <span class="usage-value">${usage.content_events || 'N/A'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Content Characters:</span>
+                                        <span class="usage-value">${usage.content_chars || 'N/A'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Reasoning Events:</span>
+                                        <span class="usage-value">${usage.reasoning_events || 'N/A'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Reasoning Characters:</span>
+                                        <span class="usage-value">${usage.reasoning_chars || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="subsection">
+                                <h5>🔧 Request Configuration</h5>
+                                <div class="usage-grid">
+                                    <div class="usage-item">
+                                        <span class="usage-label">Provider Preference:</span>
+                                        <span class="usage-value">${usage.routing?.providers?.join(', ') || 'None'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Fallback Models:</span>
+                                        <span class="usage-value">${usage.routing?.fallbacks?.join(', ') || 'None'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Sort Strategy:</span>
+                                        <span class="usage-value">${usage.routing?.sort || 'Default'}</span>
+                                    </div>
+                                    <div class="usage-item">
+                                        <span class="usage-label">Max Price Limit:</span>
+                                        <span class="usage-value">${usage.routing?.max_price ? formatCost(usage.routing.max_price) : 'None'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+        const modal = document.getElementById(modalId);
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 modal.remove();
