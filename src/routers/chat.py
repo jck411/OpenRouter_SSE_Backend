@@ -52,47 +52,33 @@ SSE_HEADERS = {
 }
 
 
-def _csv_to_list(value: str | None) -> list[str]:
-    """Convert a comma-separated string to a list of non-empty strings.
+def _csv_to_list(value: str | None) -> list[str] | None:
+    """Convert CSV string into a list with explicit None vs empty distinction.
+
+    Return [] if arg is explicitly empty, else None when arg missing.
 
     Args:
-        value: Comma-separated string or None
+        value: Comma-separated string, an empty string, or None
 
     Returns:
-        List of trimmed, non-empty strings. Returns [] if input is empty/None.
+        - None if the argument was not provided (value is None)
+        - [] if the argument was provided but empty (e.g., "")
+        - List of trimmed, non-empty strings otherwise
 
     Example:
         _csv_to_list("a, b , c") -> ["a", "b", "c"]
         _csv_to_list("") -> []
+        _csv_to_list(None) -> None
     """
-    if not value:
+    if value is None:
+        return None
+    if not value.strip():
         return []
     out = [v.strip() for v in value.split(",")]
     return [v for v in out if v]
 
 
-def _json_loads_or_passthrough(s: str | None) -> Any | None:
-    """Attempt to parse a string as JSON, returning the original string if parsing fails.
-
-    This is a lenient JSON parser that gracefully handles non-JSON strings.
-
-    Args:
-        s: String that might be JSON, or None
-
-    Returns:
-        Parsed JSON object/array/primitive, original string, or None
-
-    Example:
-        _json_loads_or_passthrough('{"key": "value"}') -> {"key": "value"}
-        _json_loads_or_passthrough('plain text') -> 'plain text'
-        _json_loads_or_passthrough(None) -> None
-    """
-    if s is None:
-        return None
-    try:
-        return json.loads(s)
-    except json.JSONDecodeError:
-        return s
+# (removed) _json_loads_or_passthrough – superseded by _strict_json_or_error
 
 
 def _strict_json_or_error(
