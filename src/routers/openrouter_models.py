@@ -438,8 +438,15 @@ async def search_models(
 
         supported_parameters_list = None
         if supported_parameters:
+            # Parse list and drop frontend-only toggles that are not real search capabilities
+            raw_params = [param.strip() for param in supported_parameters.split(",") if param.strip()]
+            # 'hide_reasoning' is a frontend display toggle, not a model/provider capability
+            # Normalize: kebab/snake to snake for comparison
+            def _norm(s: str) -> str:
+                return s.replace("-", "_").lower()
+
             supported_parameters_list = [
-                param.strip() for param in supported_parameters.split(",") if param.strip()
+                p for p in raw_params if _norm(p) != "hide_reasoning"
             ]
 
         # Create filters object - cast string lists to proper Literal types
