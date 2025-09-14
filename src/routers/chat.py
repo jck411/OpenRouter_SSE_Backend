@@ -1,6 +1,6 @@
-# ruff: noqa: TCH001
 from __future__ import annotations
 
+# ruff: noqa: TCH001
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -12,12 +12,14 @@ from app.config import get_settings
 from app.logger import log
 from services.openrouter_sse_client import (
     ReasoningParams,
-    model_supports_reasoning,  # re-exported for tests to monkeypatch
     stream_chat_completion,
 )
 
 from .openrouter_chat_schemas import ChatCompletionPayload
-from .openrouter_chat_utils import to_openrouter_messages
+from .openrouter_chat_utils import (
+    supports_reasoning_cached as model_supports_reasoning,
+    to_openrouter_messages,
+)
 from .openrouter_streaming import SSE_HEADERS, format_sse_error, format_sse_event
 
 if TYPE_CHECKING:
