@@ -2,6 +2,33 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "openrouter-server",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"./run_server.sh"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": true,
+			"group": "build",
+			"problemMatcher": []
+		},
+		{
+			"label": "openrouter-mcp",
+			"type": "shell",
+			"command": "uv",
+			"args": [
+				"run",
+				"openrouter-mcp"
+			],
+			"isBackground": true,
+			"group": "build",
+			"problemMatcher": []
+		},
+		{
 			"label": "pytest",
 			"type": "shell",
 			"command": "uv",

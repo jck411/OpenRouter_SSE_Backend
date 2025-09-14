@@ -5,6 +5,10 @@
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
     "ruff.importStrategy": "useBundled",
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
     "python.analysis.autoSearchPaths": true,
     "python.analysis.autoImportCompletions": true,
     "python.analysis.typeCheckingMode": "basic",

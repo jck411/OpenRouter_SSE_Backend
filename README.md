@@ -26,7 +26,7 @@ A FastAPI backend that provides streaming chat APIs directly through OpenRouter,
 ```bash
 git clone <repository>
 cd OpenRouter_SSE_Backend
-uv sync --dev
+uv sync
 # optional: activate if you want the interpreter in your shell
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
@@ -192,11 +192,11 @@ Transport notes:
 - **Reasoning auto-config**: If model supports reasoning and not disabled, auto-enables sensible defaults; hide via `hide_reasoning` or fully disable via `disable_reasoning`
 - **Quality gates**: `uv run ruff check`, `uv run mypy --strict`, `uv run pytest -q`
 
-## Development
+## Working locally
 
 ```bash
-# Install dev dependencies and sync lock
-uv sync --dev
+# Install dependencies and sync lock
+uv sync
 
 # Run tests
 uv run pytest -q

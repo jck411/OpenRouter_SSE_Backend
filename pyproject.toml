@@ -16,6 +16,11 @@ dependencies = [
   "mcp>=1.1",                  # official Model Context Protocol SDK (FastMCP)
   "python-dotenv>=1.0",
   "structlog>=24.1",
+    # Dev tooling installed by default for an always-developing workflow
+    "ruff>=0.12.12",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.8.0",
 ]
 
 [project.scripts]
@@ -57,13 +62,8 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
-[dependency-groups]
-dev = [
-    "ruff>=0.12.12",
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "mypy>=1.8.0",
-]
+#[dependency-groups]
+# (Removed dev group; tooling is installed by default.)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
