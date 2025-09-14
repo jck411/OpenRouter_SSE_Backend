@@ -61,6 +61,7 @@ async def test_models_search_with_filters(async_client: AsyncClient) -> None:
     """Test that search endpoint accepts filter parameters without crashing."""
     params = {
         "search_term": "gpt",
+        "families": "openai,google",
         "input_modalities": "text,image",
         "output_modalities": "text",
         "min_context_length": "4000",
@@ -102,6 +103,16 @@ async def test_models_search_toggable_reasoning_alias(async_client: AsyncClient)
         },
     )
     assert resp.status_code in [200, 401, 403, 502, 503, 504]
+
+
+@pytest.mark.asyncio
+async def test_models_families_endpoint_exists(async_client: AsyncClient) -> None:
+    """Test that the families endpoint exists and returns JSON."""
+    resp: Response = await async_client.get("/models/families")
+    # With test credentials, we expect authentication failure but endpoint should exist
+    assert resp.status_code in [200, 401, 403, 502, 503, 504]
+    content_type = resp.headers.get("content-type", "")
+    assert "application/json" in content_type
 
 
 def test_is_reasoning_toggleable_helper() -> None:

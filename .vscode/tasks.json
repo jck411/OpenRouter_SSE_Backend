@@ -17,6 +17,13 @@
 			"command": "pytest -q",
 			"isBackground": false,
 			"group": "build"
+		},
+		{
+			"label": "pytest",
+			"type": "shell",
+			"command": "pytest -q",
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }

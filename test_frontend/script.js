@@ -13,6 +13,7 @@ class ChatApp {
         this.bindEvents();
         this.initializeSliders();
         this.loadModels();
+        this.loadFamilies();
         this.checkHealth();
     }
 
@@ -49,6 +50,7 @@ class ChatApp {
         this.applyModelSearchButton = document.getElementById('apply-model-search');
         this.clearModelSearchButton = document.getElementById('clear-model-search');
         this.searchResultsCount = document.getElementById('search-results-count');
+        this.familiesContainer = document.getElementById('families-checkboxes');
 
         // Filter elements
         this.inputModalityElements = {
@@ -75,6 +77,7 @@ class ChatApp {
         this.freeOnly = document.getElementById('free-only');
         this.searchLimit = document.getElementById('search-limit');
         this.searchOffset = document.getElementById('search-offset');
+        this.familyCheckboxMap = new Map();
 
         // Parameter checkbox elements
         this.parameterCheckboxes = {
@@ -234,6 +237,82 @@ class ChatApp {
             this.addMessage('error', `Failed to load models: ${error.message}`);
         } finally {
             this.refreshModelsButton.disabled = false;
+        }
+    }
+
+    async loadFamilies() {
+        const renderDefaultFamilies = () => {
+            if (!this.familiesContainer) return;
+            this.familiesContainer.innerHTML = '';
+            this.familyCheckboxMap.clear();
+
+            const defaults = [
+                { id: 'openai', label: 'OpenAI (ChatGPT)' },
+                { id: 'google', label: 'Google (Gemini)' },
+                { id: 'anthropic', label: 'Anthropic (Claude)' },
+                { id: 'meta', label: 'Meta (Llama)' },
+                { id: 'mistral', label: 'Mistral (Mixtral)' },
+                { id: 'cohere', label: 'Cohere (Command)' }
+            ];
+
+            defaults.forEach(f => {
+                const wrapper = document.createElement('label');
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.value = f.id;
+                input.id = `family-${f.id}`;
+                wrapper.appendChild(input);
+                wrapper.appendChild(document.createTextNode(` ${f.label}`));
+                this.familiesContainer.appendChild(wrapper);
+                this.familyCheckboxMap.set(f.id, input);
+            });
+        };
+
+        try {
+            if (!this.familiesContainer) return;
+            this.familiesContainer.innerHTML = '<span class="muted">Loading families…</span>';
+
+            const controller = new AbortController();
+            const timeoutMs = 7000;
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            let response;
+            try {
+                response = await fetch(`${this.baseUrl}/models/families`, { signal: controller.signal });
+            } finally {
+                clearTimeout(timer);
+            }
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            const families = Array.isArray(data.families) ? data.families : [];
+
+            if (families.length === 0) {
+                renderDefaultFamilies();
+                return;
+            }
+
+            this.familiesContainer.innerHTML = '';
+            this.familyCheckboxMap.clear();
+
+            families.forEach(f => {
+                const id = f.id;
+                const label = f.label || id;
+                const count = f.count || 0;
+                const wrapper = document.createElement('label');
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.value = id;
+                input.id = `family-${id}`;
+                wrapper.appendChild(input);
+                wrapper.appendChild(document.createTextNode(` ${label} (${count})`));
+                this.familiesContainer.appendChild(wrapper);
+                this.familyCheckboxMap.set(id, input);
+            });
+        } catch (err) {
+            console.error('Failed to load families:', err);
+            renderDefaultFamilies();
         }
     }
 
@@ -547,19 +626,6 @@ class ChatApp {
         }
     }
 
-    updateParameterGroupVisibility() {
-        // Hide parameter groups that have no visible parameters
-        const paramGroups = this.paramsPanel.querySelectorAll('.param-group');
-        paramGroups.forEach(group => {
-            const visibleRows = group.querySelectorAll('.param-row:not([style*="display: none"])');
-            if (visibleRows.length === 0) {
-                group.style.display = 'none';
-            } else {
-                group.style.display = '';
-            }
-        });
-    }
-
     // Context length slider helper methods
     contextSliderToValue(sliderValue) {
         const contextValues = [
@@ -826,6 +892,17 @@ class ChatApp {
             filters.search_term = this.modelSearchTerm.value.trim();
         }
 
+        // Families (CSV)
+        if (this.familyCheckboxMap && this.familyCheckboxMap.size > 0) {
+            const selected = [];
+            this.familyCheckboxMap.forEach((input, id) => {
+                if (input.checked) selected.push(id);
+            });
+            if (selected.length > 0) {
+                filters.families = selected.join(',');
+            }
+        }
+
         // Input modalities
         const inputModalities = [];
         Object.entries(this.inputModalityElements).forEach(([key, element]) => {
@@ -977,6 +1054,16 @@ class ChatApp {
         Object.values(this.parameterCheckboxes).forEach(element => {
             if (element) element.checked = false;
         });
+
+        // Clear toggleable reasoning checkbox (now part of required parameters section)
+        if (this.toggleableReasoningCheckbox) {
+            this.toggleableReasoningCheckbox.checked = false;
+        }
+
+        // Clear family checkboxes
+        if (this.familyCheckboxMap && this.familyCheckboxMap.size > 0) {
+            this.familyCheckboxMap.forEach((input) => { input.checked = false; });
+        }
 
         // Reset pagination
         this.searchLimit.value = '50';

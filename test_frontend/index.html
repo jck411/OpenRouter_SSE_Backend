@@ -51,6 +51,15 @@
                     </div>
 
                     <!-- Modality Filters -->
+                    <!-- Families Filter -->
+                    <div class="filter-group">
+                        <h4>🏷️ Families</h4>
+                        <div class="checkbox-group" id="families-checkboxes">
+                            <span class="muted">Loading families…</span>
+                        </div>
+                    </div>
+
+                    <!-- Modality Filters -->
                     <div class="filter-group">
                         <h4>🔄 Modalities</h4>
                         <div class="modalities-container">
@@ -142,23 +151,15 @@
                                 Choice</label>
                             <!-- Reasoning -->
                             <label><input type="checkbox" id="param-reasoning" value="reasoning"> Reasoning</label>
-
-                        </div>
-                    </div>
-
-                    <!-- Reasoning Filter -->
-                    <div class="filter-group">
-                        <h4>🧠 Reasoning Filter</h4>
-                        <div class="checkbox-group">
+                            <!-- Toggleable Reasoning as a required parameter option -->
                             <label>
                                 <input type="checkbox" id="toggleable-reasoning">
                                 Toggleable Reasoning
                             </label>
+
                         </div>
-                        <p class="muted" style="font-size: 0.85em; margin-top: 0.25rem;">
-                            Only show models where reasoning can be enabled/disabled via parameters.
-                        </p>
                     </div>
+
 
                     <!-- Pagination Controls -->
                     <div class="filter-group">

@@ -28,6 +28,9 @@ class ModelSearchFilters(BaseModel):
     """Filters for model search functionality"""
 
     search_term: str | None = Field(None, description="Search in model name or description")
+    families: Sequence[str] | None = Field(
+        None, description="Vendor/model families to include (CSV). E.g. openai, google, anthropic"
+    )
     input_modalities: Sequence[Literal["text", "image", "file", "audio"]] | None = Field(
         None, description="Required input modalities"
     )
@@ -171,6 +174,82 @@ async def list_models() -> ModelListResponse:
         raise HTTPException(status_code=500, detail="Failed to fetch models") from e
 
 
+class FamiliesResponse(BaseModel):
+    families: list[dict[str, Any]] = Field(
+        description="List of detected model families/vendors with counts and labels"
+    )
+
+
+@router.get("/families", response_model=FamiliesResponse)
+async def list_families() -> FamiliesResponse:
+    """Return a canonical list of model families/vendors present for the current key."""
+    try:
+        resp = await client.models.list()
+        models = [m.model_dump() if hasattr(m, "model_dump") else m for m in resp.data]
+
+        counts: dict[str, int] = {}
+        seen_labels: dict[str, str] = {}
+
+        def label_for(canonical: str) -> str:
+            return {
+                "openai": "OpenAI (ChatGPT)",
+                "google": "Google (Gemini)",
+                "anthropic": "Anthropic (Claude)",
+                "meta": "Meta (Llama)",
+                "mistral": "Mistral (Mixtral)",
+                "cohere": "Cohere (Command)",
+                "xai": "xAI (Grok)",
+                "perplexity": "Perplexity",
+                "databricks": "Databricks",
+                "deepseek": "DeepSeek",
+                "groq": "Groq",
+                "nvidia": "NVIDIA",
+                "qwen": "Qwen (Alibaba)",
+            }.get(canonical, canonical.capitalize())
+
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            model_id = str(m.get("id", "")).lower()
+            name = str(m.get("name", "")).lower()
+            author = _extract_vendor_prefix(model_id) or ""
+
+            canonical: str | None = None
+            if author:
+                # Prefer mapping via alias table (e.g., meta-llama → meta)
+                canonical = _canonical_family(author) or author
+            else:
+                # Fallback: infer via keywords if missing author
+                for kw, can in _FAMILY_ALIASES.items():
+                    if kw in model_id or kw in name:
+                        canonical = can
+                        break
+
+            if not canonical:
+                continue
+
+            counts[canonical] = counts.get(canonical, 0) + 1
+            seen_labels.setdefault(canonical, label_for(canonical))
+
+        families_list = [
+            {"id": fam, "label": seen_labels.get(fam, fam.capitalize()), "count": counts[fam]}
+            for fam in sorted(counts.keys())
+        ]
+
+        return FamiliesResponse(families=families_list)
+
+    except APITimeoutError as e:
+        raise HTTPException(status_code=504, detail="OpenRouter API timeout") from e
+    except APIConnectionError as e:
+        raise HTTPException(status_code=503, detail="Cannot connect to OpenRouter API") from e
+    except APIError as e:
+        raise HTTPException(status_code=502, detail=f"OpenRouter API error: {e.message}") from e
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to list families") from e
+
+
 def _get_model_pricing(model: dict[str, Any]) -> tuple[float, float]:
     """Extract input and output pricing from model data"""
     pricing = model.get("pricing", {})
@@ -197,6 +276,13 @@ def _normalize_string_list(items: Sequence[str] | None) -> list[str]:
 
 def _model_matches_filters(model: dict[str, Any], filters: ModelSearchFilters) -> bool:
     """Check if a model matches the search filters"""
+
+    # Family filtering (by vendor/author prefix and well-known aliases)
+    if filters.families:
+        families = _normalize_string_list(filters.families)
+        if families:
+            if not _model_in_families(model, set(families)):
+                return False
 
     # Search term filtering
     if filters.search_term:
@@ -375,6 +461,81 @@ def _get_model_provider_parameter_analysis(
     }
 
 
+# --- Family helpers ---
+_FAMILY_ALIASES: dict[str, str] = {
+    # Canonical -> canonical
+    "openai": "openai",
+    "google": "google",
+    "anthropic": "anthropic",
+    "meta": "meta",
+    "mistral": "mistral",
+    "cohere": "cohere",
+    "xai": "xai",
+    "perplexity": "perplexity",
+    "databricks": "databricks",
+    "deepseek": "deepseek",
+    "groq": "groq",
+    "nvidia": "nvidia",
+    "qwen": "qwen",  # Alibaba/Qwen often uses 'qwen/'
+    # Aliases
+    "gpt": "openai",
+    "chatgpt": "openai",
+    "o1": "openai",
+    "o3": "openai",
+    "gemini": "google",
+    "vertex": "google",
+    "claude": "anthropic",
+    "llama": "meta",
+    "llama3": "meta",
+    "mixtral": "mistral",
+    "command": "cohere",
+}
+
+
+def _canonical_family(token: str) -> str | None:
+    t = token.strip().lower()
+    if not t:
+        return None
+    # map alias or return token itself if it's a known canonical
+    if t in _FAMILY_ALIASES:
+        return _FAMILY_ALIASES[t]
+    # Also accept exact vendor prefixes seen in ids (e.g., 'microsoft', 'meta-llama' -> map to meta)
+    if t.startswith("meta-"):
+        return "meta"
+    return t
+
+
+def _extract_vendor_prefix(model_id: str) -> str | None:
+    # Expect "author/slug"
+    if not model_id or "/" not in model_id:
+        return None
+    author = model_id.split("/", 1)[0].strip().lower()
+    return author or None
+
+
+def _model_in_families(model: dict[str, Any], families: set[str]) -> bool:
+    model_id = str(model.get("id", "")).lower()
+    name = str(model.get("name", "")).lower()
+    author = _extract_vendor_prefix(model_id)
+
+    # Canonicalize requested families
+    requested = {f for f in (_canonical_family(f) for f in families) if f}
+    if not requested:
+        return True  # nothing to filter
+
+    # Vendor/author direct match
+    if author and author in requested:
+        return True
+
+    # Heuristic keyword check in id/name for aliases
+    # e.g., "gemini" -> google, "claude" -> anthropic, etc.
+    for kw, canonical in _FAMILY_ALIASES.items():
+        if canonical in requested and (kw in model_id or kw in name):
+            return True
+
+    return False
+
+
 def _sort_models(models: list[dict[str, Any]], sort_by: SortOptions) -> list[dict[str, Any]]:
     """Sort models according to the specified sort strategy
 
@@ -431,6 +592,13 @@ def _sort_models(models: list[dict[str, Any]], sort_by: SortOptions) -> list[dic
 async def search_models(
     # Search and filter parameters
     search_term: str | None = Query(None, description="Search in model name or description"),
+    families: str | None = Query(
+        None,
+        description=(
+            "Comma-separated list of model families/vendors (e.g., openai, google, anthropic). "
+            "Aliases supported: gpt/chatgpt→openai, gemini→google, claude→anthropic, llama→meta, mixtral→mistral, command→cohere"
+        ),
+    ),
     input_modalities: str | None = Query(
         None,
         description="Comma-separated list of required input modalities (text,image,file,audio)",
@@ -484,6 +652,10 @@ async def search_models(
                 all_models_dict.append(m.model_dump() if hasattr(m, "model_dump") else dict(m))
 
         # Parse comma-separated parameters into lists
+        families_list = None
+        if families:
+            families_list = [f.strip() for f in families.split(",") if f.strip()]
+
         input_modalities_list = None
         if input_modalities:
             input_modalities_list = [
@@ -515,6 +687,7 @@ async def search_models(
 
         filters = ModelSearchFilters(
             search_term=search_term,
+            families=cast("Sequence[str] | None", families_list),
             input_modalities=cast(
                 "Sequence[Literal['text', 'image', 'file', 'audio']] | None", input_modalities_list
             ),
@@ -545,6 +718,7 @@ async def search_models(
         # Build response
         filters_applied = {
             "search_term": search_term,
+            "families": families_list,
             "input_modalities": input_modalities_list,
             "output_modalities": output_modalities_list,
             "min_context_length": min_context_length,
