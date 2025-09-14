@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from routers.chat import router as chat_router
+from routers.chat import openai_router, router as chat_router
 from routers.openrouter_models import router as models_router
 
 settings = get_settings()
@@ -17,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(openai_router)
 app.include_router(models_router)
 
 

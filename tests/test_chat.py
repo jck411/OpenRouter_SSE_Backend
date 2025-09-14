@@ -73,14 +73,17 @@ async def test_pass_through_knobs(async_client: AsyncClient) -> None:
         "routers.chat.stream_chat_completion",
         new=capturing_stream,
     ):
-        body = {"history": [], "message": "Hi"}
-        params = {
-            "providers": "openai,anthropic",
-            "sort": "throughput_high_to_low",
-            "fallbacks": "foo,bar",
-            "max_price": "0.01",
+        body = {
+            "history": [],
+            "message": "Hi",
+            "routing": {
+                "providers": ["openai", "anthropic"],
+                "sort": "throughput_high_to_low",
+                "fallbacks": ["foo", "bar"],
+                "max_price": 0.01,
+            },
         }
-        resp: Response = await async_client.post("/chat", json=body, params=params)
+        resp: Response = await async_client.post("/chat", json=body)
         assert resp.status_code == 200
         # Check knobs present
         assert captured.get("providers") == ["openai", "anthropic"]
@@ -93,15 +96,10 @@ async def test_pass_through_knobs(async_client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_malformed_json_params_emit_error(async_client: AsyncClient) -> None:
     """Params that look like JSON but are invalid should cause SSE error."""
-    body = {"history": [], "message": "Hi"}
-    # tools is JSON-looking but invalid
-    resp: Response = await async_client.post("/chat?tools={invalid}", json=body)
-    assert resp.status_code == 200
-    text = resp.text
-    assert "event: error" in text
-    assert "Malformed JSON in 'tools'" in text
-    # Should still end with done
-    assert "event: done" in text
+    body = {"history": [], "message": "Hi", "tools": "{invalid}"}
+    # Now that body is validated by Pydantic, this should be a validation error
+    resp: Response = await async_client.post("/chat", json=body)
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

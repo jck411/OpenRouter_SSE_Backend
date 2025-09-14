@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
@@ -22,6 +22,8 @@ from services.openrouter_sse_client import (
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+# OpenAI-compatible alias router (no prefix) for /v1/chat/completions
+openai_router = APIRouter(tags=["chat"])
 settings = get_settings()
 
 # ---------- Models ----------
@@ -32,11 +34,72 @@ class Message(BaseModel):
     content: str
 
 
-class ChatRequest(BaseModel):
+class Sampling(BaseModel):
+    temperature: float | None = Field(None, ge=0, le=2)
+    top_p: float | None = Field(None, ge=0, le=1)
+    top_k: int | None = Field(None, ge=1)
+    frequency_penalty: float | None = Field(None, ge=-2, le=2)
+    presence_penalty: float | None = Field(None, ge=-2, le=2)
+    repetition_penalty: float | None = Field(None, ge=0)
+    min_p: float | None = Field(None, ge=0, le=1)
+    top_a: float | None = Field(None, ge=0, le=1)
+    seed: int | None = None
+
+
+class Routing(BaseModel):
+    sort: str | None = None
+    providers: list[str] | None = None
+    fallbacks: list[str] | None = None
+    max_price: float | None = Field(None, ge=0)
+    require_parameters: bool | None = None
+
+
+class ChatCompletionPayload(BaseModel):
+    # Core
     history: list[Message] = Field(default_factory=list)
     message: str = Field(..., min_length=1)
     model: str | None = Field(None, description="Model ID to use for the chat")
     web_search: bool = Field(False, description="Enable web search for this request")
+
+    # Grouped controls
+    sampling: Sampling | None = Field(
+        None, description="Sampling and decoding controls (temperature, top_p, etc.)"
+    )
+    routing: Routing | None = Field(
+        None, description="Provider routing and price caps (providers, fallbacks, max_price, etc.)"
+    )
+
+    # Output controls
+    max_tokens: int | None = Field(None, ge=1, description="Maximum response length")
+    stop: str | list[str] | None = Field(None, description="Stop sequences (string or array)")
+    logit_bias: dict[str, float] | None = Field(None, description="Token bias as JSON object")
+    logprobs: bool | None = Field(None, description="Return log probabilities")
+    top_logprobs: int | None = Field(
+        None, ge=0, le=20, description="Number of top logprobs to return"
+    )
+    response_format: dict[str, Any] | None = Field(
+        None, description="Response format (JSON schema)"
+    )
+
+    # Function calling
+    tools: list[dict[str, Any]] | None = Field(None, description="Available tools array")
+    tool_choice: str | dict[str, Any] | None = Field(
+        None, description="Tool selection strategy"
+    )
+
+    # Reasoning controls
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        None, description="Reasoning effort hint"
+    )
+    reasoning_max_tokens: int | None = Field(None, ge=1)
+    # Explicitly control whether to hide reasoning deltas in the stream
+    hide_reasoning: bool | None = Field(
+        None, description="If true, hide reasoning trace events in the response stream"
+    )
+    disable_reasoning: bool | None = Field(
+        None,
+        description="Force disable reasoning entirely (overrides any reasoning_* params and auto-detection)",
+    )
 
 
 # ---------- Utilities ----------
@@ -52,71 +115,7 @@ SSE_HEADERS = {
 }
 
 
-def _csv_to_list(value: str | None) -> list[str] | None:
-    """Convert CSV string into a list with explicit None vs empty distinction.
-
-    Return [] if arg is explicitly empty, else None when arg missing.
-
-    Args:
-        value: Comma-separated string, an empty string, or None
-
-    Returns:
-        - None if the argument was not provided (value is None)
-        - [] if the argument was provided but empty (e.g., "")
-        - List of trimmed, non-empty strings otherwise
-
-    Example:
-        _csv_to_list("a, b , c") -> ["a", "b", "c"]
-        _csv_to_list("") -> []
-        _csv_to_list(None) -> None
-    """
-    if value is None:
-        return None
-    if not value.strip():
-        return []
-    out = [v.strip() for v in value.split(",")]
-    return [v for v in out if v]
-
-
-# (removed) _json_loads_or_passthrough – superseded by _strict_json_or_error
-
-
-def _strict_json_or_error(
-    param_value: str | None, param_name: str
-) -> tuple[bool, Any | None, str | None]:
-    """Validate JSON-looking strings with strict parsing requirements.
-
-    If a string starts with '{' or '[', it's treated as JSON and must parse correctly.
-    Otherwise, the string is passed through unchanged. This prevents silent failures
-    where malformed JSON parameters would be ignored.
-
-    Args:
-        param_value: The parameter value to validate
-        param_name: Name of the parameter (for error messages)
-
-    Returns:
-        Tuple of (success, parsed_value_or_original, error_message)
-        - success: True if validation passed
-        - parsed_value_or_original: Parsed JSON or original string
-        - error_message: None on success, error description on failure
-
-    Example:
-        _strict_json_or_error('{"valid": true}', 'test') -> (True, {"valid": True}, None)
-        _strict_json_or_error('{invalid}', 'test') -> (False, None, "Malformed JSON...")
-        _strict_json_or_error('plain text', 'test') -> (True, 'plain text', None)
-    """
-    if param_value is None:
-        return True, None, None
-    val = param_value.strip()
-    if not val:
-        return True, None, None
-    if val[0] in "[{":
-        try:
-            return True, json.loads(val), None
-        except json.JSONDecodeError as e:
-            return False, None, f"Malformed JSON in '{param_name}': {str(e)}"
-    # Not JSON-looking, passthrough as original string
-    return True, param_value, None
+# (legacy CSV/JSON query parsing helpers removed in favor of typed JSON body via Pydantic)
 
 
 def _sanitize_sse_line(line: str) -> str:
@@ -202,58 +201,15 @@ def _to_openrouter_messages(history: list[Message]) -> list[OpenRouterMessage]:
 # ---------- Route ----------
 
 
-@router.post("")
+@router.post(
+    "",
+    response_model=None,
+    summary="OpenAI-compatible chat completion endpoint",
+)
 async def chat(
-    req: ChatRequest,
-    # OpenRouter routing & cost controls:
-    sort: str | None = Query(
-        None, description="OpenRouter provider sort strategy (price, throughput, latency, default)"
-    ),
-    providers: str | None = Query(None, description="CSV list of preferred providers"),
-    max_price: float | None = Query(None, ge=0, description="Maximum cost per request"),
-    fallbacks: str | None = Query(None, description="CSV list of fallback models"),
-    require_parameters: bool | None = Query(
-        None, description="Require all providers support all parameters"
-    ),
-    # Model behavior parameters:
-    temperature: float | None = Query(None, ge=0, le=2, description="Response randomness (0-2)"),
-    top_p: float | None = Query(None, ge=0, le=1, description="Nucleus sampling (0-1)"),
-    top_k: int | None = Query(None, ge=1, description="Top-k sampling"),
-    frequency_penalty: float | None = Query(
-        None, ge=-2, le=2, description="Reduce repetition (-2 to 2)"
-    ),
-    presence_penalty: float | None = Query(
-        None, ge=-2, le=2, description="Encourage new topics (-2 to 2)"
-    ),
-    repetition_penalty: float | None = Query(
-        None, ge=0, description="Alternative repetition control"
-    ),
-    min_p: float | None = Query(None, ge=0, le=1, description="Minimum probability threshold"),
-    top_a: float | None = Query(None, ge=0, le=1, description="Alternative sampling method"),
-    seed: int | None = Query(None, description="Seed for reproducible outputs"),
-    # Output controls:
-    max_tokens: int | None = Query(None, ge=1, description="Maximum response length"),
-    stop: str | None = Query(None, description="Stop sequences (JSON array or single string)"),
-    logit_bias: str | None = Query(None, description="Token bias as JSON object"),
-    logprobs: bool | None = Query(None, description="Return log probabilities"),
-    top_logprobs: int | None = Query(
-        None, ge=0, le=20, description="Number of top logprobs to return"
-    ),
-    response_format: str | None = Query(None, description="Response format (JSON schema)"),
-    # Function calling:
-    tools: str | None = Query(None, description="Available tools as JSON array"),
-    tool_choice: str | None = Query(None, description="Tool selection strategy"),
-    # Reasoning controls (OpenRouter reasoning-capable models):
-    reasoning_effort: Literal["low", "medium", "high"] | None = Query(
-        None, description="Reasoning effort hint"
-    ),
-    reasoning_max_tokens: int | None = Query(None, ge=1),
-    reasoning_exclude: bool | None = Query(None, description="If true, hide reasoning trace"),
-    disable_reasoning: bool | None = Query(
-        None,
-        description="Force disable reasoning entirely (overrides any reasoning_* params and auto-detection)",
-    ),
-) -> StreamingResponse:
+    payload: ChatCompletionPayload,
+    stream: bool = Query(True, description="If true, stream as SSE; else return JSON response"),
+) -> Response:
     """
     Stream AI assistant responses as Server-Sent Events (SSE) with real-time delivery.
 
@@ -264,7 +220,6 @@ async def chat(
     - Tool calling and function execution
     - Web search integration (via :online model variants)
     - Automatic reasoning detection and configuration
-
     The response streams different event types:
     - `reasoning`: Thinking/reasoning process deltas (for capable models)
     - `content`: Actual response content deltas
@@ -298,7 +253,7 @@ async def chat(
         tool_choice: Tool selection strategy
         reasoning_effort: Reasoning depth for capable models
         reasoning_max_tokens: Limit reasoning token usage
-        reasoning_exclude: Hide reasoning from response
+        hide_reasoning: Hide reasoning trace in response stream
         disable_reasoning: Force disable all reasoning features
 
     Returns:
@@ -320,83 +275,51 @@ async def chat(
         event: done
         data: {"completed": true}
     """
-    if not req.message.strip():
+    p = payload
+    if not p.message.strip():
         raise HTTPException(status_code=400, detail="Empty message")
 
-    # Parse CSV parameters -> lists
-    providers_list = _csv_to_list(providers)
-    fallbacks_list = _csv_to_list(fallbacks)
-
     # Convert API messages -> OpenRouter messages
-    history_messages = _to_openrouter_messages(req.history)
+    history_messages = _to_openrouter_messages(p.history)
 
     # Determine model (optionally ensure :online)
-    final_model = req.model or settings.model_name
-    if req.web_search and not final_model.endswith(":online"):
+    final_model = p.model or settings.model_name
+    if p.web_search and not final_model.endswith(":online"):
         final_model = f"{final_model}:online"
 
-    # Build reasoning dict (normalize conflicting flags)
+    # Build reasoning dict (normalize flags)
     reasoning: ReasoningParams | None = None
-    if reasoning_effort or (reasoning_max_tokens is not None) or (reasoning_exclude is not None):
+    # Determine explicit hide preference
+    _hide: bool | None = p.hide_reasoning
+
+    if p.reasoning_effort or (p.reasoning_max_tokens is not None) or (_hide is not None):
         r: ReasoningParams = {}
-        if reasoning_effort:
-            r["effort"] = reasoning_effort
-        if reasoning_max_tokens is not None:
-            r["max_tokens"] = reasoning_max_tokens
-        if reasoning_exclude is not None:
-            r["exclude"] = reasoning_exclude
+        if p.reasoning_effort:
+            r["effort"] = p.reasoning_effort
+        if p.reasoning_max_tokens is not None:
+            r["max_tokens"] = p.reasoning_max_tokens
+        if _hide is not None:
+            # ReasoningParams uses negative flag 'exclude' (exclude = hide)
+            r["exclude"] = _hide
         reasoning = r
     else:
         # If the model supports reasoning (and caller didn't specify), opt-in with a sensible default.
-        if not disable_reasoning and await _supports_reasoning_cached(final_model):
+        if not p.disable_reasoning and await _supports_reasoning_cached(final_model):
             reasoning = {"effort": "high"}
 
     # Explicit override: disable reasoning completely
-    if disable_reasoning:
+    if p.disable_reasoning:
         reasoning = None
 
-    # Parse JSON parameters (strict for JSON-looking values)
-    parse_errors: list[str] = []
-    # stop: allow single string OR JSON array/object. If JSON-looking, require valid JSON
-    ok, parsed_stop, err = _strict_json_or_error(stop, "stop")
-    if not ok and err:
-        parse_errors.append(err)
-    ok, parsed_logit_bias, err = _strict_json_or_error(logit_bias, "logit_bias")
-    if not ok and err:
-        parse_errors.append(err)
-    ok, parsed_response_format, err = _strict_json_or_error(response_format, "response_format")
-    if not ok and err:
-        parse_errors.append(err)
-    ok, parsed_tools, err = _strict_json_or_error(tools, "tools")
-    if not ok and err:
-        parse_errors.append(err)
-    ok, parsed_tool_choice, err = _strict_json_or_error(tool_choice, "tool_choice")
-    if not ok and err:
-        parse_errors.append(err)
-
     # Add user message to conversation
-    messages = history_messages + [{"role": "user", "content": req.message}]
-
-    # If any parsing errors, emit structured SSE error and finish
-    if parse_errors:
-
-        async def iterate_error() -> AsyncIterator[str]:
-            yield _format_sse_error(
-                "; ".join(parse_errors),
-                "bad_request",
-            )
-            yield _format_sse_event("done", {"completed": False})
-
-        return StreamingResponse(
-            iterate_error(),
-            media_type="text/event-stream",
-            headers=SSE_HEADERS,
-        )
+    messages = history_messages + [{"role": "user", "content": p.message}]
 
     async def iterate() -> AsyncIterator[str]:
         started_monotonic = time.monotonic()
         reasoning_events = 0
         content_events = 0
+        # Locally suppress reasoning streaming if requested or fully disabled
+        suppress_reasoning_stream = bool(p.hide_reasoning) or bool(p.disable_reasoning)
         # Enhanced usage tracking - capture tokens, costs, and metadata
         # Use OpenRouter's native token fields
         prompt_tokens: int | None = None
@@ -419,35 +342,36 @@ async def chat(
                 messages=messages,
                 model=final_model,
                 # OpenRouter routing controls
-                providers=providers_list,
-                fallbacks=fallbacks_list,
-                sort=sort,
-                max_price=max_price,
-                require_parameters=require_parameters,
+                providers=(p.routing.providers if p.routing else None),
+                fallbacks=(p.routing.fallbacks if p.routing else None),
+                sort=(p.routing.sort if p.routing else None),
+                max_price=(p.routing.max_price if p.routing else None),
+                require_parameters=(p.routing.require_parameters if p.routing else None),
                 # Reasoning controls
                 reasoning=reasoning,
                 # Standard LLM parameters
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-                repetition_penalty=repetition_penalty,
-                min_p=min_p,
-                top_a=top_a,
-                seed=seed,
-                max_tokens=max_tokens,
-                stop=parsed_stop,
-                logit_bias=parsed_logit_bias,
-                logprobs=logprobs,
-                top_logprobs=top_logprobs,
-                response_format=parsed_response_format,
-                tools=parsed_tools,
-                tool_choice=parsed_tool_choice,
+                temperature=(p.sampling.temperature if p.sampling else None),
+                top_p=(p.sampling.top_p if p.sampling else None),
+                top_k=(p.sampling.top_k if p.sampling else None),
+                frequency_penalty=(p.sampling.frequency_penalty if p.sampling else None),
+                presence_penalty=(p.sampling.presence_penalty if p.sampling else None),
+                repetition_penalty=(p.sampling.repetition_penalty if p.sampling else None),
+                min_p=(p.sampling.min_p if p.sampling else None),
+                top_a=(p.sampling.top_a if p.sampling else None),
+                seed=(p.sampling.seed if p.sampling else None),
+                max_tokens=p.max_tokens,
+                stop=p.stop,
+                logit_bias=p.logit_bias,
+                logprobs=p.logprobs,
+                top_logprobs=p.top_logprobs,
+                response_format=p.response_format,
+                tools=p.tools,
+                tool_choice=p.tool_choice,
             ):
                 if event["type"] == "reasoning":
-                    reasoning_events += 1
-                    yield _format_sse_event("reasoning", event["data"])
+                    if not suppress_reasoning_stream:
+                        reasoning_events += 1
+                        yield _format_sse_event("reasoning", event["data"])
                 elif event["type"] == "content":
                     content_events += 1
                     yield _format_sse_event("content", event["data"])
@@ -518,11 +442,11 @@ async def chat(
                         "image_tokens": image_tokens,
                         # Echo core routing knobs for observability
                         "routing": {
-                            "providers": providers_list,
-                            "fallbacks": fallbacks_list,
-                            "sort": sort,
-                            "max_price": max_price,
-                            "require_parameters": require_parameters,
+                            "providers": (p.routing.providers if p.routing else None),
+                            "fallbacks": (p.routing.fallbacks if p.routing else None),
+                            "sort": (p.routing.sort if p.routing else None),
+                            "max_price": (p.routing.max_price if p.routing else None),
+                            "require_parameters": (p.routing.require_parameters if p.routing else None),
                         },
                     }
                     # Emit usage log (structured) with a request correlation id
@@ -540,13 +464,145 @@ async def chat(
             yield _format_sse_error(f"Unexpected error - {str(e)}", "unexpected_error")
             return
 
-    return StreamingResponse(
-        iterate(),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
-    )
+    # SSE vs JSON response
+    if stream:
+        return StreamingResponse(
+            iterate(),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
+    else:
+        # Non-streaming: collect content and usage
+        started_monotonic = time.monotonic()
+        content_accum: list[str] = []
+        # Usage fields (same as in iterate())
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        total_tokens: int | None = None
+        cost: float | None = None
+        provider: str | None = None
+        actual_model: str | None = None
+        cached_tokens: int | None = None
+        reasoning_tokens: int | None = None
+        audio_tokens: int | None = None
+        image_tokens: int | None = None
+        prompt_cost: float | None = None
+        completion_cost: float | None = None
+        is_byok: bool | None = None
+
+        try:
+            async for event in stream_chat_completion(
+                messages=messages,
+                model=final_model,
+                providers=(p.routing.providers if p.routing else None),
+                fallbacks=(p.routing.fallbacks if p.routing else None),
+                sort=(p.routing.sort if p.routing else None),
+                max_price=(p.routing.max_price if p.routing else None),
+                require_parameters=(p.routing.require_parameters if p.routing else None),
+                reasoning=reasoning,
+                temperature=(p.sampling.temperature if p.sampling else None),
+                top_p=(p.sampling.top_p if p.sampling else None),
+                top_k=(p.sampling.top_k if p.sampling else None),
+                frequency_penalty=(p.sampling.frequency_penalty if p.sampling else None),
+                presence_penalty=(p.sampling.presence_penalty if p.sampling else None),
+                repetition_penalty=(p.sampling.repetition_penalty if p.sampling else None),
+                min_p=(p.sampling.min_p if p.sampling else None),
+                top_a=(p.sampling.top_a if p.sampling else None),
+                seed=(p.sampling.seed if p.sampling else None),
+                max_tokens=p.max_tokens,
+                stop=p.stop,
+                logit_bias=p.logit_bias,
+                logprobs=p.logprobs,
+                top_logprobs=p.top_logprobs,
+                response_format=p.response_format,
+                tools=p.tools,
+                tool_choice=p.tool_choice,
+            ):
+                if event["type"] == "content":
+                    text = event["data"].get("text")
+                    if isinstance(text, str):
+                        content_accum.append(text)
+                elif event["type"] == "reasoning":
+                    # Suppress reasoning in non-stream mode to match hide/disable behavior
+                    # (we don't currently surface reasoning in non-stream responses)
+                    continue
+                elif event["type"] == "usage":
+                    usage_data = event.get("data", {})
+                    prompt_tokens = usage_data.get("prompt_tokens")
+                    completion_tokens = usage_data.get("completion_tokens")
+                    total_tokens = usage_data.get("total_tokens")
+                    cost = usage_data.get("cost")
+                    is_byok = usage_data.get("is_byok")
+                    provider = usage_data.get("provider")
+                    actual_model = usage_data.get("actual_model")
+                    prompt_details = usage_data.get("prompt_tokens_details", {})
+                    cached_tokens = prompt_details.get("cached_tokens")
+                    audio_tokens = prompt_details.get("audio_tokens")
+                    completion_details = usage_data.get("completion_tokens_details", {})
+                    reasoning_tokens = completion_details.get("reasoning_tokens")
+                    image_tokens = completion_details.get("image_tokens")
+                    cost_details = usage_data.get("cost_details", {})
+                    prompt_cost = cost_details.get("upstream_inference_prompt_cost")
+                    completion_cost = cost_details.get("upstream_inference_completions_cost")
+                elif event["type"] == "error":
+                    # In non-stream mode, surface error as JSON
+                    return JSONResponse(
+                        {
+                            "error": event["data"].get("error"),
+                            "type": event["data"].get("type"),
+                        },
+                        status_code=502,
+                    )
+                # ignore reasoning/done here; we'll finalize usage below
+
+            duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+            duration_s = max(duration_ms / 1000.0, 1e-6)
+            usage_payload = {
+                "model": final_model,
+                "actual_model": actual_model,
+                "duration_ms": duration_ms,
+                "tokens_per_second": (
+                    (completion_tokens or 0) / duration_s if completion_tokens is not None else None
+                ),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "cost": cost,
+                "prompt_cost": prompt_cost,
+                "completion_cost": completion_cost,
+                "is_byok": is_byok,
+                "provider": provider,
+                "cached_tokens": cached_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "audio_tokens": audio_tokens,
+                "image_tokens": image_tokens,
+                "routing": {
+                    "providers": (p.routing.providers if p.routing else None),
+                    "fallbacks": (p.routing.fallbacks if p.routing else None),
+                    "sort": (p.routing.sort if p.routing else None),
+                    "max_price": (p.routing.max_price if p.routing else None),
+                    "require_parameters": (p.routing.require_parameters if p.routing else None),
+                },
+            }
+            request_id = f"req-{uuid.uuid4().hex}"
+            log.info("chat_usage", request_id=request_id, **usage_payload)
+            return JSONResponse({"content": "".join(content_accum), "usage": usage_payload})
+        except Exception as e:  # pragma: no cover - safety
+            return JSONResponse(
+                {"error": f"Unexpected error - {str(e)}", "type": "unexpected_error"},
+                status_code=500,
+            )
 
 # ---------- Caching ----------
+
+# Expose OpenAI-compatible route alias (outside the docstring)
+openai_router.add_api_route(
+    "/v1/chat/completions",
+    chat,
+    methods=["POST"],
+    response_model=None,
+    summary="OpenAI-compatible chat completion endpoint",
+)
 
 # Model-capability queries add a network RTT. Cache for 1 hour.
 _REASONING_CACHE_TTL = 60 * 60

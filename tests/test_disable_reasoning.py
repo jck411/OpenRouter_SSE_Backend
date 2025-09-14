@@ -20,10 +20,14 @@ async def test_disable_reasoning_prevents_reasoning_path(
     monkeypatch.setattr("routers.chat.model_supports_reasoning", _always_supports)
 
     # Minimal request body - use a valid model ID
-    body = {"history": [], "message": "Test message", "model": "openai/gpt-4o"}
+    body = {
+        "history": [],
+        "message": "Test message",
+        "model": "openai/gpt-4o",
+        "disable_reasoning": True,
+    }
 
-    # With disable_reasoning=true
-    resp = await async_client.post("/chat?disable_reasoning=true", json=body)
+    resp = await async_client.post("/chat", json=body)
     # Accept various upstream failures, but if 200, inspect SSE content
     assert resp.status_code in [200, 400, 502, 503, 504]
     text = resp.text

@@ -87,8 +87,7 @@ class ChatApp {
             response_format: document.getElementById('param-response-format'),
             tools: document.getElementById('param-tools'),
             tool_choice: document.getElementById('param-tool-choice'),
-            reasoning: document.getElementById('param-reasoning'),
-            reasoning_exclude: document.getElementById('param-reasoning-exclude')
+            reasoning: document.getElementById('param-reasoning')
         };
 
         // Slider elements with value displays
@@ -460,7 +459,7 @@ class ChatApp {
             // Reasoning controls
             'reasoning-effort': 'reasoning_effort',
             'reasoning-max-tokens': 'reasoning_max_tokens',
-            'hide-reasoning': 'reasoning_exclude',  // Maps to backend reasoning_exclude parameter
+            'hide-reasoning': 'hide_reasoning',  // Maps to backend hide_reasoning parameter
             'disable-reasoning': 'disable_reasoning'  // Maps to backend disable_reasoning parameter
         };
 
@@ -470,11 +469,39 @@ class ChatApp {
             if (paramRow) {
                 let shouldShow = false;
 
-                // For reasoning parameters, show if model supports any reasoning capability
-                if (['reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'disable_reasoning'].includes(paramName)) {
-                    shouldShow = supportedParams.some(param =>
-                        ['reasoning', 'reasoning_effort', 'reasoning_max_tokens', 'reasoning_exclude', 'disable_reasoning'].includes(param)
-                    );
+                // Normalize model id for heuristics
+                const modelId = (this.currentModel || '').toLowerCase();
+                const isThinkingVariant = (
+                    modelId.includes('thinking') ||
+                    modelId.includes('reasoner') ||
+                    (modelId.startsWith('openai/') && (modelId.includes('o1') || modelId.includes('o3')))
+                );
+
+                // Convenience helpers
+                const supportsAnyReasoning = () => (
+                    supportedParams.some(p => ['reasoning', 'reasoning_effort', 'include_reasoning'].includes(p)) ||
+                    isThinkingVariant
+                );
+                const supportsReasoningEffort = () => (
+                    supportedParams.includes('reasoning_effort') ||
+                    (modelId.startsWith('openai/') && (modelId.includes('o1') || modelId.includes('o3')))
+                );
+                const supportsDisableReasoning = () => (
+                    // Only show a true disable toggle if upstream exposes an include_reasoning-style switch
+                    supportedParams.includes('include_reasoning') && !isThinkingVariant
+                );
+
+                // Parameter-specific visibility rules
+                if (paramName === 'disable_reasoning') {
+                    shouldShow = supportsDisableReasoning();
+                } else if (paramName === 'hide_reasoning') {
+                    // Hide is a local display toggle; show when model emits reasoning
+                    shouldShow = supportsAnyReasoning();
+                } else if (paramName === 'reasoning_effort') {
+                    shouldShow = supportsReasoningEffort();
+                } else if (paramName === 'reasoning_max_tokens') {
+                    // Show max tokens if any reasoning support exists
+                    shouldShow = supportsAnyReasoning();
                 } else {
                     // For other parameters, check if it's in the provider parameter union
                     shouldShow = supportedParams.includes(paramName);
@@ -709,9 +736,9 @@ class ChatApp {
             const reasoningMaxTokens = getValue('reasoning-max-tokens');
             if (reasoningMaxTokens !== null) params.reasoning_max_tokens = reasoningMaxTokens;
 
-            // Hide reasoning checkbox maps to reasoning_exclude parameter
+            // Hide reasoning checkbox maps to hide_reasoning parameter
             const hideReasoning = getValue('hide-reasoning');
-            if (hideReasoning) params.reasoning_exclude = hideReasoning;
+            if (hideReasoning) params.hide_reasoning = hideReasoning;
         }
 
         return params;
@@ -761,7 +788,8 @@ class ChatApp {
             if (!element && key === 'disable_reasoning') {
                 element = document.getElementById('disable-reasoning');
             }
-            if (!element && key === 'reasoning_exclude') {
+            // handle hide_reasoning mapping explicitly if needed
+            if (!element && key === 'hide_reasoning') {
                 element = document.getElementById('hide-reasoning');
             }
             if (!element) return;
@@ -1006,16 +1034,113 @@ class ChatApp {
         }
     }
 
+    // Build chat-specific parameters for request body, matching backend schema
+    getChatBodyParameters() {
+        const body = {};
+
+        // Routing (object)
+        const routing = {};
+        const sort = document.getElementById('sort')?.value.trim();
+        if (sort) routing.sort = sort;
+        const providersStr = document.getElementById('providers')?.value.trim();
+        if (providersStr) routing.providers = providersStr.split(',').map(s => s.trim()).filter(Boolean);
+        const fallbacksStr = document.getElementById('fallbacks')?.value.trim();
+        if (fallbacksStr) routing.fallbacks = fallbacksStr.split(',').map(s => s.trim()).filter(Boolean);
+        const maxPriceEl = document.getElementById('max-price');
+        if (maxPriceEl && maxPriceEl.value !== '') routing.max_price = parseFloat(maxPriceEl.value);
+        const requireParamsEl = document.getElementById('require-parameters');
+        if (requireParamsEl && requireParamsEl.checked) routing.require_parameters = true;
+        if (Object.keys(routing).length) body.routing = routing;
+
+        // Sampling (object)
+        const sampling = {};
+        const num = (id) => {
+            const el = document.getElementById(id);
+            if (!el || el.value === '') return null;
+            const v = Number(el.value);
+            return Number.isNaN(v) ? null : v;
+        };
+        const temperature = num('temperature');
+        if (temperature !== null && temperature !== 1.0) sampling.temperature = temperature;
+        const topP = num('top-p');
+        if (topP !== null && topP !== 1.0) sampling.top_p = topP;
+        const topK = num('top-k');
+        if (topK !== null) sampling.top_k = topK;
+        const freqPen = num('frequency-penalty');
+        if (freqPen !== null && freqPen !== 0.0) sampling.frequency_penalty = freqPen;
+        const presPen = num('presence-penalty');
+        if (presPen !== null && presPen !== 0.0) sampling.presence_penalty = presPen;
+        const repPen = num('repetition-penalty');
+        if (repPen !== null) sampling.repetition_penalty = repPen;
+        const minP = num('min-p');
+        if (minP !== null) sampling.min_p = minP;
+        const topA = num('top-a');
+        if (topA !== null) sampling.top_a = topA;
+        const seed = num('seed');
+        if (seed !== null) sampling.seed = seed;
+        if (Object.keys(sampling).length) body.sampling = sampling;
+
+        // Output controls (top-level)
+        const maxTokens = num('max-tokens');
+        if (maxTokens !== null) body.max_tokens = maxTokens;
+        const stopEl = document.getElementById('stop');
+        if (stopEl && stopEl.value.trim()) body.stop = stopEl.value.trim();
+        const logitBiasEl = document.getElementById('logit-bias');
+        if (logitBiasEl && logitBiasEl.value.trim()) {
+            try { body.logit_bias = JSON.parse(logitBiasEl.value.trim()); } catch { }
+        }
+        const logprobsEl = document.getElementById('logprobs');
+        if (logprobsEl && logprobsEl.checked) body.logprobs = true;
+        const topLogprobs = num('top-logprobs');
+        if (topLogprobs !== null) body.top_logprobs = topLogprobs;
+        const respFmtEl = document.getElementById('response-format');
+        if (respFmtEl && respFmtEl.value.trim()) {
+            try { body.response_format = JSON.parse(respFmtEl.value.trim()); } catch { }
+        }
+
+        // Function calling
+        const toolsEl = document.getElementById('tools');
+        if (toolsEl && toolsEl.value.trim()) {
+            try { body.tools = JSON.parse(toolsEl.value.trim()); } catch { }
+        }
+        const toolChoiceEl = document.getElementById('tool-choice');
+        if (toolChoiceEl && toolChoiceEl.value.trim()) {
+            try { body.tool_choice = JSON.parse(toolChoiceEl.value.trim()); }
+            catch { body.tool_choice = toolChoiceEl.value.trim(); }
+        }
+
+        // Reasoning controls (top-level)
+        const disableReasoningEl = document.getElementById('disable-reasoning');
+        if (disableReasoningEl && disableReasoningEl.checked) body.disable_reasoning = true;
+        const reasoningEffortEl = document.getElementById('reasoning-effort');
+        if ((!disableReasoningEl || !disableReasoningEl.checked) && reasoningEffortEl && reasoningEffortEl.value) {
+            body.reasoning_effort = reasoningEffortEl.value;
+        }
+        const reasoningMaxEl = document.getElementById('reasoning-max-tokens');
+        if ((!disableReasoningEl || !disableReasoningEl.checked) && reasoningMaxEl && reasoningMaxEl.value !== '') {
+            body.reasoning_max_tokens = Number(reasoningMaxEl.value);
+        }
+        const hideReasoningEl = document.getElementById('hide-reasoning');
+        if ((!disableReasoningEl || !disableReasoningEl.checked) && hideReasoningEl && hideReasoningEl.checked) {
+            body.hide_reasoning = true;
+        }
+
+        return body;
+    }
+
     async handleStreamingResponse(requestBody, messageId) {
-        const url = this.buildUrlWithParams();
-        console.log('Sending request to:', url); // Debug log
+        const url = `${this.baseUrl}/chat?stream=true`;
+        // Merge additional parameters into body per backend schema
+        const extras = this.getChatBodyParameters();
+        const fullBody = { ...requestBody, ...extras };
+        console.log('Sending request to:', url, 'with body:', fullBody); // Debug log
 
         const response = await fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(fullBody)
         });
 
         if (!response.ok) {
