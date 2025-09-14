@@ -4,24 +4,42 @@
 		{
 			"label": "pytest",
 			"type": "shell",
-			"command": "pytest -q",
+			"command": "uv",
+			"args": [
+				"run",
+				"pytest",
+				"-q"
+			],
 			"isBackground": false,
 			"problemMatcher": [
-				"$pytest"
+				"$python"
 			],
 			"group": "build"
 		},
 		{
-			"label": "pytest",
+			"label": "ruff-check",
 			"type": "shell",
-			"command": "pytest -q",
+			"command": "uv",
+			"args": [
+				"run",
+				"ruff",
+				"check",
+				"src",
+				"tests"
+			],
 			"isBackground": false,
 			"group": "build"
 		},
 		{
-			"label": "pytest",
+			"label": "mypy",
 			"type": "shell",
-			"command": "pytest -q",
+			"command": "uv",
+			"args": [
+				"run",
+				"mypy",
+				"--strict",
+				"src"
+			],
 			"isBackground": false,
 			"group": "build"
 		}

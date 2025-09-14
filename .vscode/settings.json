@@ -1,5 +1,5 @@
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/backend/bin/python",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "python.envFile": "${workspaceFolder}/.env",
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff"
@@ -8,6 +8,7 @@
     "python.analysis.autoSearchPaths": true,
     "python.analysis.autoImportCompletions": true,
     "python.analysis.typeCheckingMode": "basic",
+    "python.terminal.activateEnvironment": true,
     "python.linting.enabled": false,
     "editor.formatOnSave": true,
     "editor.formatOnSaveMode": "file",

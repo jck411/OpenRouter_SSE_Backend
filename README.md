@@ -23,9 +23,9 @@ A FastAPI backend that provides streaming chat APIs directly through OpenRouter,
 ```bash
 git clone <repository>
 cd openrouter-sse-backend
-uv venv
+uv sync --dev
+# optional: activate if you want the interpreter in your shell
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e .
 ```
 
 ### Environment
@@ -150,18 +150,18 @@ Environment variables:
 ## Development
 
 ```bash
-# Install dev dependencies
-uv pip install -e .[dev]
+# Install dev dependencies and sync lock
+uv sync --dev
 
 # Run tests
-pytest
+uv run pytest -q
 
 # Lint and format
-ruff check src tests
-ruff format src tests
+uv run ruff check src tests
+uv run ruff format src tests
 
 # Type check
-mypy src
+uv run mypy --strict src
 ```
 
 ## MCP Server
