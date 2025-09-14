@@ -43,51 +43,30 @@ async def chat(
     """
     Stream AI assistant responses as Server-Sent Events (SSE) with real-time delivery.
 
-    This endpoint handles chat conversations with support for:
+    Features:
     - Streaming content and reasoning traces
-    - OpenRouter model routing and cost controls
-    - Advanced model parameters (temperature, top-p, etc.)
-    - Tool calling and function execution
-    - Web search integration (via :online model variants)
-    - Automatic reasoning detection and configuration
-    The response streams different event types:
-    - `reasoning`: Thinking/reasoning process deltas (for capable models)
-    - `content`: Actual response content deltas
-    - `usage`: Final metrics (timing, tokens, routing info)
-    - `error`: Structured error information
-    - `done`: Completion signal
+    - OpenRouter routing controls: `providers`, `sort`, `fallbacks`, `max_price`, `require_parameters`
+    - Advanced sampling params: `temperature`, `top_p`, `top_k`, penalties, `seed`, `max_tokens`, `stop`, `logit_bias`, `logprobs`, `top_logprobs`, `response_format`
+    - Tool calling and function execution: `tools`, `tool_choice`
+    - Optional web search via `:online` model variants
+    - Automatic reasoning configuration: `reasoning_effort`, `reasoning_max_tokens`, `hide_reasoning`, `disable_reasoning`
 
-                    )
-                    # Emit usage log (structured) with a request correlation id
-                    request_id = f"req-{uuid.uuid4().hex}"
-                    log.info("chat_usage", request_id=request_id, **usage_payload)
-                    yield format_sse_event("usage", usage_payload)
-                    yield format_sse_event("done", event["data"])
-
-        except Exception as e:
-            yield format_sse_error(f"Unexpected error - {str(e)}", "unexpected_error")
-            return
-        seed: Reproducibility seed
-        max_tokens: Maximum response length
-        stop: Stop sequences (string or JSON array)
-        logit_bias: Token probability adjustments (JSON object)
-        logprobs: Include log probabilities in response
-        top_logprobs: Number of top log probabilities to return
-        response_format: Output format constraints (JSON schema)
-        tools: Available tools for function calling (JSON array)
-        tool_choice: Tool selection strategy
-        reasoning_effort: Reasoning depth for capable models
-        reasoning_max_tokens: Limit reasoning token usage
-        hide_reasoning: Hide reasoning trace in response stream
-        disable_reasoning: Force disable all reasoning features
+    SSE event types:
+    - `reasoning`: thinking/reasoning deltas (for capable models)
+    - `content`: response content deltas
+    - `usage`: final metrics (timing, tokens, cost, routing info)
+    - `error`: structured error information
+    - `done`: completion signal
 
     Returns:
-        StreamingResponse with SSE events containing response data
+    - `StreamingResponse` (SSE) when `stream=true`
+    - JSON with `content` and `usage` when `stream=false`
 
     Raises:
-        HTTPException: For invalid requests (400) or server errors (500+)
+    - `HTTPException(400)` for invalid requests (e.g., empty message)
+    - `HTTPException(500+)` for server errors
 
-    Example SSE Events:
+    Example SSE:
         event: reasoning
         data: {"text": "Let me think about this..."}
 
@@ -95,7 +74,7 @@ async def chat(
         data: {"text": "Hello! How can I help you?"}
 
         event: usage
-        data: {"model": "anthropic/claude-3-sonnet", "duration_ms": 1500, ...}
+        data: {"model": "openrouter/auto", "duration_ms": 1500, ...}
 
         event: done
         data: {"completed": true}
