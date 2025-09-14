@@ -1,201 +1,31 @@
+# ruff: noqa: TCH001
 from __future__ import annotations
 
-import json
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Literal
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.logger import log
 from services.openrouter_sse_client import (
-    OpenRouterMessage,
     ReasoningParams,
-    model_supports_reasoning,
+    model_supports_reasoning,  # re-exported for tests to monkeypatch
     stream_chat_completion,
 )
 
+from .openrouter_chat_schemas import ChatCompletionPayload
+from .openrouter_chat_utils import to_openrouter_messages
+from .openrouter_streaming import SSE_HEADERS, format_sse_error, format_sse_event
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 router = APIRouter(prefix="/chat", tags=["chat"])
-# OpenAI-compatible alias router (no prefix) for /v1/chat/completions
-openai_router = APIRouter(tags=["chat"])
+openai_router = APIRouter(tags=["chat"])  # OpenAI-compatible alias
 settings = get_settings()
-
-# ---------- Models ----------
-
-
-class Message(BaseModel):
-    role: Literal["user", "model"]
-    content: str
-
-
-class Sampling(BaseModel):
-    temperature: float | None = Field(None, ge=0, le=2)
-    top_p: float | None = Field(None, ge=0, le=1)
-    top_k: int | None = Field(None, ge=1)
-    frequency_penalty: float | None = Field(None, ge=-2, le=2)
-    presence_penalty: float | None = Field(None, ge=-2, le=2)
-    repetition_penalty: float | None = Field(None, ge=0)
-    min_p: float | None = Field(None, ge=0, le=1)
-    top_a: float | None = Field(None, ge=0, le=1)
-    seed: int | None = None
-
-
-class Routing(BaseModel):
-    sort: str | None = None
-    providers: list[str] | None = None
-    fallbacks: list[str] | None = None
-    max_price: float | None = Field(None, ge=0)
-    require_parameters: bool | None = None
-
-
-class ChatCompletionPayload(BaseModel):
-    # Core
-    history: list[Message] = Field(default_factory=list)
-    message: str = Field(..., min_length=1)
-    model: str | None = Field(None, description="Model ID to use for the chat")
-    web_search: bool = Field(False, description="Enable web search for this request")
-
-    # Grouped controls
-    sampling: Sampling | None = Field(
-        None, description="Sampling and decoding controls (temperature, top_p, etc.)"
-    )
-    routing: Routing | None = Field(
-        None, description="Provider routing and price caps (providers, fallbacks, max_price, etc.)"
-    )
-
-    # Output controls
-    max_tokens: int | None = Field(None, ge=1, description="Maximum response length")
-    stop: str | list[str] | None = Field(None, description="Stop sequences (string or array)")
-    logit_bias: dict[str, float] | None = Field(None, description="Token bias as JSON object")
-    logprobs: bool | None = Field(None, description="Return log probabilities")
-    top_logprobs: int | None = Field(
-        None, ge=0, le=20, description="Number of top logprobs to return"
-    )
-    response_format: dict[str, Any] | None = Field(
-        None, description="Response format (JSON schema)"
-    )
-
-    # Function calling
-    tools: list[dict[str, Any]] | None = Field(None, description="Available tools array")
-    tool_choice: str | dict[str, Any] | None = Field(
-        None, description="Tool selection strategy"
-    )
-
-    # Reasoning controls
-    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
-        None, description="Reasoning effort hint"
-    )
-    reasoning_max_tokens: int | None = Field(None, ge=1)
-    # Explicitly control whether to hide reasoning deltas in the stream
-    hide_reasoning: bool | None = Field(
-        None, description="If true, hide reasoning trace events in the response stream"
-    )
-    disable_reasoning: bool | None = Field(
-        None,
-        description="Force disable reasoning entirely (overrides any reasoning_* params and auto-detection)",
-    )
-
-
-# ---------- Utilities ----------
-
-# -------- Constants --------
-
-# Default headers for SSE streams. Adding an explicit content-type prevents
-# some proxies/browsers from buffering.
-SSE_HEADERS = {
-    "Cache-Control": "no-cache",  # Reduce proxy buffering
-    "X-Accel-Buffering": "no",  # Disable Nginx buffering
-    "Content-Type": "text/event-stream; charset=utf-8",  # Explicit MIME type
-}
-
-
-# (legacy CSV/JSON query parsing helpers removed in favor of typed JSON body via Pydantic)
-
-
-def _sanitize_sse_line(line: str) -> str:
-    """Sanitize a single SSE line.
-
-    Lines starting with ':' are treated by browsers as comments and dropped.
-    Prefix with a space to preserve user content starting with ':'.
-    """
-    return f" {line}" if line.startswith(":") else line
-
-
-def _format_sse_event(event_type: str, data: Any) -> str:
-    """Format data as a Server-Sent Events (SSE) message.
-
-    Converts arbitrary data into proper SSE format with event type and data payload.
-    Handles multi-line data by prefixing each line with 'data:' as required by SSE spec.
-
-    Args:
-        event_type: The SSE event type (e.g., 'content', 'reasoning', 'error')
-        data: Data to include in the event (will be JSON-encoded if dict/list)
-
-    Returns:
-        Properly formatted SSE event string ending with double newline
-
-    Example:
-        _format_sse_event('content', {'text': 'hello'}) ->
-        "event: content\ndata: {\"text\": \"hello\"}\n\n"
-    """
-    payload = json.dumps(data) if isinstance(data, dict | list) else str(data)
-    # SSE requires each line to start with 'data:'; split to be robust to newlines
-    lines = payload.splitlines() or [""]
-    buf = [f"event: {event_type}"]
-    for ln in lines:
-        buf.append(f"data: {_sanitize_sse_line(ln)}")
-    buf.append("")  # blank line terminator
-    return "\n".join(buf) + "\n"
-
-
-def _format_sse_error(error_message: str, error_type: str = "error") -> str:
-    """Format an error message as a structured SSE event.
-
-    Creates a standardized error event with both human-readable message and error type
-    for programmatic handling by clients.
-
-    Args:
-        error_message: Human-readable error description
-        error_type: Error category/type for client logic (default: "error")
-
-    Returns:
-        SSE-formatted error event
-
-    Example:
-        _format_sse_error("Invalid JSON", "bad_request") ->
-        "event: error\ndata: {\"error\": \"Invalid JSON\", \"type\": \"bad_request\"}\n\n"
-    """
-    return _format_sse_event("error", {"error": error_message, "type": error_type})
-
-
-def _to_openrouter_messages(history: list[Message]) -> list[OpenRouterMessage]:
-    """Convert API message history to OpenRouter message format.
-
-    Transforms the external API message format (with 'model' role) to OpenRouter's
-    expected format (with 'assistant' role).
-
-    Args:
-        history: List of Message objects from the API request
-
-    Returns:
-        List of OpenRouterMessage objects compatible with OpenRouter API
-
-    Note:
-        Maps 'model' role to 'assistant' role as required by OpenRouter
-    """
-    out: list[OpenRouterMessage] = []
-    for m in history:
-        if m.role == "user":
-            out.append({"role": "user", "content": m.content})
-        else:
-            out.append({"role": "assistant", "content": m.content})
-    return out
 
 
 # ---------- Route ----------
@@ -227,21 +57,16 @@ async def chat(
     - `error`: Structured error information
     - `done`: Completion signal
 
-    Args:
-        req: Chat request with message history and new user message
-        sort: OpenRouter provider selection strategy (price, throughput, latency, etc.)
-        providers: Comma-separated list of preferred providers
-        max_price: Maximum cost limit per request
-        fallbacks: Comma-separated list of fallback models
-        require_parameters: Ensure all providers support all parameters
-        temperature: Response randomness (0.0 = deterministic, 2.0 = very random)
-        top_p: Nucleus sampling threshold
-        top_k: Limit to top K tokens
-        frequency_penalty: Reduce token repetition
-        presence_penalty: Encourage topic diversity
-        repetition_penalty: Alternative repetition control
-        min_p: Minimum probability threshold
-        top_a: Alternative sampling method
+                    )
+                    # Emit usage log (structured) with a request correlation id
+                    request_id = f"req-{uuid.uuid4().hex}"
+                    log.info("chat_usage", request_id=request_id, **usage_payload)
+                    yield format_sse_event("usage", usage_payload)
+                    yield format_sse_event("done", event["data"])
+
+        except Exception as e:
+            yield format_sse_error(f"Unexpected error - {str(e)}", "unexpected_error")
+            return
         seed: Reproducibility seed
         max_tokens: Maximum response length
         stop: Stop sequences (string or JSON array)
@@ -280,7 +105,7 @@ async def chat(
         raise HTTPException(status_code=400, detail="Empty message")
 
     # Convert API messages -> OpenRouter messages
-    history_messages = _to_openrouter_messages(p.history)
+    history_messages = to_openrouter_messages(p.history)
 
     # Determine model (optionally ensure :online)
     final_model = p.model or settings.model_name
@@ -304,7 +129,7 @@ async def chat(
         reasoning = r
     else:
         # If the model supports reasoning (and caller didn't specify), opt-in with a sensible default.
-        if not p.disable_reasoning and await _supports_reasoning_cached(final_model):
+        if not p.disable_reasoning and await model_supports_reasoning(final_model):
             reasoning = {"effort": "high"}
 
     # Explicit override: disable reasoning completely
@@ -371,10 +196,10 @@ async def chat(
                 if event["type"] == "reasoning":
                     if not suppress_reasoning_stream:
                         reasoning_events += 1
-                        yield _format_sse_event("reasoning", event["data"])
+                        yield format_sse_event("reasoning", event["data"])
                 elif event["type"] == "content":
                     content_events += 1
-                    yield _format_sse_event("content", event["data"])
+                    yield format_sse_event("content", event["data"])
                 elif event["type"] == "usage":
                     # Capture enhanced usage data from OpenRouter (with usage accounting enabled)
                     usage_data = event.get("data", {})
@@ -409,7 +234,7 @@ async def chat(
                     # Note: We don't forward usage events to the client here,
                     # they'll be included in the final usage event before done
                 elif event["type"] == "error":
-                    yield _format_sse_event("error", event["data"])
+                    yield format_sse_event("error", event["data"])
                 elif event["type"] == "done":
                     # Emit final usage/meta event before done
                     duration_ms = int((time.monotonic() - started_monotonic) * 1000)
@@ -427,7 +252,9 @@ async def chat(
                         "total_tokens": total_tokens,
                         # Simple derived rate metric
                         "tokens_per_second": (
-                            (completion_tokens or 0) / duration_s if completion_tokens is not None else None
+                            (completion_tokens or 0) / duration_s
+                            if completion_tokens is not None
+                            else None
                         ),
                         # Cost information (in OpenRouter credits)
                         "cost": cost,
@@ -446,7 +273,9 @@ async def chat(
                             "fallbacks": (p.routing.fallbacks if p.routing else None),
                             "sort": (p.routing.sort if p.routing else None),
                             "max_price": (p.routing.max_price if p.routing else None),
-                            "require_parameters": (p.routing.require_parameters if p.routing else None),
+                            "require_parameters": (
+                                p.routing.require_parameters if p.routing else None
+                            ),
                         },
                     }
                     # Emit usage log (structured) with a request correlation id
@@ -457,11 +286,11 @@ async def chat(
                         request_id=request_id,
                         **usage_payload,
                     )
-                    yield _format_sse_event("usage", usage_payload)
-                    yield _format_sse_event("done", event["data"])
+                    yield format_sse_event("usage", usage_payload)
+                    yield format_sse_event("done", event["data"])
 
         except Exception as e:
-            yield _format_sse_error(f"Unexpected error - {str(e)}", "unexpected_error")
+            yield format_sse_error(f"Unexpected error - {str(e)}", "unexpected_error")
             return
 
     # SSE vs JSON response
@@ -593,6 +422,7 @@ async def chat(
                 status_code=500,
             )
 
+
 # ---------- Caching ----------
 
 # Expose OpenAI-compatible route alias (outside the docstring)
@@ -603,17 +433,3 @@ openai_router.add_api_route(
     response_model=None,
     summary="OpenAI-compatible chat completion endpoint",
 )
-
-# Model-capability queries add a network RTT. Cache for 1 hour.
-_REASONING_CACHE_TTL = 60 * 60
-_reasoning_cache: dict[str, tuple[bool, float]] = {}
-
-
-async def _supports_reasoning_cached(model: str) -> bool:
-    now = time.monotonic()
-    hit = _reasoning_cache.get(model)
-    if hit and (now - hit[1] < _REASONING_CACHE_TTL):
-        return hit[0]
-    value = await model_supports_reasoning(model)
-    _reasoning_cache[model] = (value, now)
-    return value

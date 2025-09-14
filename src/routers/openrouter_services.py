@@ -22,6 +22,8 @@ from .openrouter_utils import (
     get_model_provider_parameter_analysis,
     label_for_family,
     model_matches_filters,
+    parse_csv,
+    parse_supported_parameters,
     sort_models,
 )
 
@@ -92,23 +94,7 @@ def _supported_parameters_catalog() -> dict[str, Any]:
     }
 
 
-def _parse_csv(value: str | None) -> list[str] | None:
-    if value is None:
-        return None
-    items = [part.strip() for part in value.split(",")]
-    return [x for x in items if x]
-
-
-def _parse_supported_parameters(raw: str | None) -> list[str] | None:
-    """Parse CSV supported params and drop frontend-only toggles."""
-    if not raw:
-        return None
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-
-    def _norm(s: str) -> str:
-        return s.replace("-", "_").lower()
-
-    return [p for p in parts if _norm(p) != "hide_reasoning"]
+# (parsers now shared in openrouter_utils)
 
 
 # --- Public services ----------------------------------------------------------
@@ -174,10 +160,10 @@ async def search_models_service(
 ) -> ModelSearchResponse:
     all_models = await _fetch_all_models()
 
-    families_list = _parse_csv(families)
-    input_modalities_list = _parse_csv(input_modalities)
-    output_modalities_list = _parse_csv(output_modalities)
-    supported_parameters_list = _parse_supported_parameters(supported_parameters)
+    families_list = parse_csv(families)
+    input_modalities_list = parse_csv(input_modalities)
+    output_modalities_list = parse_csv(output_modalities)
+    supported_parameters_list = parse_supported_parameters(supported_parameters)
 
     toggle_flag = bool(toggleable_reasoning or toggable_reasoning)
 

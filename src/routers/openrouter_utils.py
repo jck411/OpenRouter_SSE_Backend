@@ -284,6 +284,8 @@ __all__ = [
     "get_model_provider_parameter_analysis",
     "model_matches_filters",
     "sort_models",
+    "parse_csv",
+    "parse_supported_parameters",
 ]
 
 
@@ -322,3 +324,26 @@ def sort_models(models: list[dict[str, Any]], sort_by: SortOptions) -> list[dict
 
     # Fallback: deterministic id order (covers default/unknown sort_by values)
     return sorted(models, key=lambda m: m.get("id", ""))  # type: ignore[unreachable]
+
+
+# --- Shared simple parsers (CSV & supported params) ---
+
+
+def parse_csv(value: str | None) -> list[str] | None:
+    """Parse a comma-separated string into list[str]; returns None if value is None."""
+    if value is None:
+        return None
+    items = [part.strip() for part in value.split(",")]
+    return [x for x in items if x]
+
+
+def parse_supported_parameters(raw: str | None) -> list[str] | None:
+    """Parse CSV of supported params, dropping UI-only toggles like 'hide_reasoning'."""
+    if not raw:
+        return None
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+
+    def _norm(s: str) -> str:
+        return s.replace("-", "_").lower()
+
+    return [p for p in parts if _norm(p) != "hide_reasoning"]
