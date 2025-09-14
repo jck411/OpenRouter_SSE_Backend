@@ -78,6 +78,61 @@ async def test_models_search_with_filters(async_client: AsyncClient) -> None:
     assert resp.status_code in [200, 401, 403, 502, 503, 504]
 
 
+@pytest.mark.asyncio
+async def test_models_search_toggleable_reasoning_param(async_client: AsyncClient) -> None:
+    """Endpoint should accept toggleable_reasoning param without crashing."""
+    resp: Response = await async_client.get(
+        "/models/search",
+        params={
+            "toggleable_reasoning": "true",
+            "limit": "5",
+        },
+    )
+    assert resp.status_code in [200, 401, 403, 502, 503, 504]
+
+
+@pytest.mark.asyncio
+async def test_models_search_toggable_reasoning_alias(async_client: AsyncClient) -> None:
+    """Alias parameter 'toggable_reasoning' should be accepted without crashing."""
+    resp: Response = await async_client.get(
+        "/models/search",
+        params={
+            "toggable_reasoning": "true",
+            "limit": "3",
+        },
+    )
+    assert resp.status_code in [200, 401, 403, 502, 503, 504]
+
+
+def test_is_reasoning_toggleable_helper() -> None:
+    """Unit test the local toggleability helper with synthetic models."""
+    from src.routers.openrouter_models import _is_reasoning_toggleable
+
+    # OpenAI o1: reasoning always-on → not toggleable
+    m1: dict[str, Any] = {"id": "openai/o1-mini"}
+    assert _is_reasoning_toggleable(m1) is False
+
+    # Supported parameters includes only generic 'reasoning' (no explicit on/off) → not toggleable (strict)
+    m2: dict[str, Any] = {"id": "example/model", "supported_parameters": ["reasoning"]}
+    assert _is_reasoning_toggleable(m2) is False
+
+    # Always-on thinking variant should be excluded (even if include_reasoning appeared)
+    m3: dict[str, Any] = {"id": "vendor/model-thinking-32b", "supported_parameters": ["reasoning"]}
+    assert _is_reasoning_toggleable(m3) is False
+
+    # Negative case
+    m4: dict[str, Any] = {"id": "x/y", "supported_parameters": ["temperature"]}
+    assert _is_reasoning_toggleable(m4) is False
+
+    # Positive: include_reasoning explicitly available
+    m5: dict[str, Any] = {"id": "x/y", "supported_parameters": ["include_reasoning"]}
+    assert _is_reasoning_toggleable(m5) is True
+
+    # Negative (strict): generic 'reasoning' without include_reasoning is not enough
+    m6: dict[str, Any] = {"id": "x/y", "supported_parameters": ["reasoning", "temperature"]}
+    assert _is_reasoning_toggleable(m6) is False
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_models_search_endpoint_with_real_credentials(async_client: AsyncClient) -> None:

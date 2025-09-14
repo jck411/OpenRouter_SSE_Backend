@@ -61,6 +61,7 @@ class ChatApp {
             text: document.getElementById('output-text'),
             image: document.getElementById('output-image')
         };
+        this.toggleableReasoningCheckbox = document.getElementById('toggleable-reasoning');
         // Updated context length slider (single slider for minimum)
         this.contextLengthSlider = document.getElementById('context-length-slider');
         this.contextLengthLabel = document.getElementById('context-length-label');
@@ -878,6 +879,11 @@ class ChatApp {
         });
         if (selectedParams.length > 0) {
             filters.supported_parameters = selectedParams.join(',');
+        }
+
+        // Toggleable reasoning filter
+        if (this.toggleableReasoningCheckbox && this.toggleableReasoningCheckbox.checked) {
+            filters.toggleable_reasoning = true;
         }
 
         // Sorting

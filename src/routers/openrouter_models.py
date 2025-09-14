@@ -42,6 +42,12 @@ class ModelSearchFilters(BaseModel):
     supported_parameters: Sequence[str] | None = Field(
         None, description="Required supported parameters"
     )
+    toggleable_reasoning: bool = Field(
+        False,
+        description=(
+            "Only include models where reasoning can be enabled/disabled via parameters"
+        ),
+    )
 
 
 class ModelSearchResponse(BaseModel):
@@ -257,7 +263,52 @@ def _model_matches_filters(model: dict[str, Any], filters: ModelSearchFilters) -
             if required_param not in model_parameters:
                 return False
 
+    # Toggleable reasoning filter (metadata-driven)
+    if filters.toggleable_reasoning:
+        if not _is_reasoning_toggleable(model):
+            return False
+
     return True
+
+
+def _is_reasoning_toggleable(model_obj: dict[str, Any]) -> bool:
+    """Determine if a model's reasoning is toggleable based on metadata.
+
+    Mirrors the logic used by the SSE client to keep behavior consistent.
+    """
+    # Guard: ensure dict-like access
+    if not isinstance(model_obj, dict):
+        return False
+
+    model_id = str(model_obj.get("id", ""))
+
+    # Always-on reasoning families are NOT toggleable: OpenAI o1/o3, 'thinking'/'reasoner' variants
+    lower_id = model_id.lower()
+    if model_id.startswith("openai/") and ("o1" in lower_id or "o3" in lower_id):
+        return False
+
+    # Primary signal (STRICT): explicit upstream toggle parameter only
+    supported_params = model_obj.get("supported_parameters", [])
+    if isinstance(supported_params, list):
+        # Normalize params: lower-case and convert dashes to underscores
+        norm_params = [
+            str(p).replace("-", "_").lower() for p in supported_params if isinstance(p, str)
+        ]
+
+        # If provider exposes include_reasoning, it can be toggled on/off (subject to always-on exclusion)
+        if "include_reasoning" in norm_params:
+            # Still exclude models that are clearly always-on reasoning variants by name/topology
+            topology = model_obj.get("topology")
+            if isinstance(topology, str) and topology.lower() in {"reasoning", "reasoner"}:
+                return False
+            if any(tok in lower_id for tok in ("thinking", "reasoner")):
+                return False
+            return True
+
+    # Generic metadata like capabilities/features/tags/modalities/topology alone
+    # is insufficient to guarantee an on/off toggle; default to not toggleable.
+
+    return False
 
 
 def _get_model_provider_parameter_analysis(
@@ -395,6 +446,15 @@ async def search_models(
     supported_parameters: str | None = Query(
         None, description="Comma-separated list of required supported parameters"
     ),
+    toggleable_reasoning: bool = Query(
+        False,
+        description="If true, only include models where reasoning can be toggled",
+    ),
+    # Back-compat/alias: accept 'toggable_reasoning' (single-g) from UI if used
+    toggable_reasoning: bool | None = Query(
+        None,
+        description="Alias for toggleable_reasoning (single-g spelling)",
+    ),
     # Sort parameter
     sort: SortOptions = Query(
         "newest",
@@ -450,6 +510,9 @@ async def search_models(
             ]
 
         # Create filters object - cast string lists to proper Literal types
+        # Unify alias into a single flag
+        toggle_flag = toggleable_reasoning or bool(toggable_reasoning)
+
         filters = ModelSearchFilters(
             search_term=search_term,
             input_modalities=cast(
@@ -464,6 +527,7 @@ async def search_models(
             max_price=max_price,
             free_only=free_only,
             supported_parameters=supported_parameters_list,
+            toggleable_reasoning=toggle_flag,
         )
 
         # Apply filters
@@ -489,6 +553,8 @@ async def search_models(
             "max_price": max_price,
             "free_only": free_only,
             "supported_parameters": supported_parameters_list,
+            "toggleable_reasoning": toggle_flag,
+            "toggable_reasoning": toggable_reasoning,
             "limit": limit,
             "offset": offset,
         }
